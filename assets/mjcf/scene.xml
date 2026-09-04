@@ -1,0 +1,60 @@
+<mujoco model="contact_deflection">
+  <compiler angle="radian" autolimits="true"
+            meshdir="../../third_party/space_robot_env/assets/stls"/>
+  <option timestep="0.001" gravity="0 0 0" integrator="implicitfast"/>
+  <visual><global offwidth="640" offheight="480"/></visual>
+  <default>
+    <joint damping="0.25" armature="0.03"/>
+    <geom condim="3" friction="0.6 0.01 0.001"
+          solref="0.01 1" solimp="0.9 0.95 0.001"/>
+    <motor ctrllimited="true"/>
+    <default class="arm1"><joint damping="0.25"/></default>
+    <default class="arm2"><joint damping="0.25"/></default>
+  </default>
+  <asset>
+    <material name="bus_mat" rgba="0.25 0.3 0.38 1"/>
+    <material name="shield_mat" rgba="0.15 0.55 0.85 1"/>
+    <material name="projectile_mat" rgba="0.9 0.25 0.12 1"/>
+    <mesh name="v_base" file="v_base.stl"/>
+    <mesh name="v_shoulder" file="v_shoulder.stl"/>
+    <mesh name="v_upperarm" file="v_upperarm.stl"/>
+    <mesh name="v_forearm" file="v_forearm.stl"/>
+    <mesh name="v_wrist1" file="v_wrist1.stl"/>
+    <mesh name="v_wrist2" file="v_wrist2.stl"/>
+    <mesh name="v_wrist3" file="v_wrist3.stl"/>
+  </asset>
+  <worldbody>
+    <light pos="0 -3 4" dir="0 1 -1"/>
+    <camera name="overview" pos="4 -6 3"
+            xyaxes="0.83 0.55 0 -0.22 0.33 0.92"/>
+    <body name="spacecraft_bus" pos="0 0 0">
+      <freejoint name="spacecraft_free"/>
+      <geom name="bus" type="box" size="0.8726 0.8726 0.8726"
+            mass="200" material="bus_mat"/>
+      <body name="manipulator_mount" pos="0.67 0.67 0.9526">
+        <geom name="mount" mass="10" pos="0 0 -0.04"
+              size="0.1 0.1 0.04" type="box" material="bus_mat"/>
+        <include file="space_robot_ur5.xml"/>
+      </body>
+    </body>
+    <body name="projectile" pos="0 -2 1.7">
+      <freejoint name="projectile_free"/>
+      <geom name="projectile_geom" type="sphere" size="0.1"
+            mass="0.5" material="projectile_mat"/>
+    </body>
+  </worldbody>
+  <actuator>
+    <motor name="shoulder_pan_motor" joint="arm:shoulder_pan_joint"
+           gear="1" ctrlrange="-150 150"/>
+    <motor name="shoulder_lift_motor" joint="arm:shoulder_lift_joint"
+           gear="1" ctrlrange="-150 150"/>
+    <motor name="elbow_motor" joint="arm:elbow_joint"
+           gear="1" ctrlrange="-150 150"/>
+    <motor name="wrist_1_motor" joint="arm:wrist_1_joint"
+           gear="1" ctrlrange="-28 28"/>
+    <motor name="wrist_2_motor" joint="arm:wrist_2_joint"
+           gear="1" ctrlrange="-28 28"/>
+    <motor name="wrist_3_motor" joint="arm:wrist_3_joint"
+           gear="1" ctrlrange="-28 28"/>
+  </actuator>
+</mujoco>

@@ -1,0 +1,17 @@
+name: contact-deflection
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip
+  - numpy>=1.26
+  - gymnasium>=1.1,<2
+  - pyyaml>=6
+  - pytest>=8,<9
+  - ruff>=0.8,<1
+  - mypy>=1.13,<2
+  - imageio>=2.36
+  - imageio-ffmpeg>=0.5
+  - pip:
+      - mujoco>=3.2,<4
+      - -e .
