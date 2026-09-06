@@ -12,3 +12,4 @@ videos/
 checkpoints/
 scratch/
 outputs/
+.vscode/
