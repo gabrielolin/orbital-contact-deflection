@@ -3,7 +3,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from contact_deflection.envs import ContactDeflectionEnv
+from contact_deflection.envs.space_robot_env import SpaceRobotEnv
 from contact_deflection.kinematics.mink_ik import IKConfig, MinkIK
 from contact_deflection.kinematics.reachable_workspace import (
     ReachableWorkspace,
@@ -70,8 +70,8 @@ def test_workspace_base_transform_preserves_line_parameterization() -> None:
 
 
 def test_mink_generated_workspace_nominal_acceptance_and_provenance() -> None:
-    environment = ContactDeflectionEnv()
-    environment.reset(seed=0)
+    environment = SpaceRobotEnv()
+    environment._reset_physics()
     solver = MinkIK(environment.model, IKConfig(orientation_cost=0.0))
     # One deliberately unreachable uniform sample plus the nominal candidate.
     settings = WorkspaceConfig(

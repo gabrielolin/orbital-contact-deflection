@@ -5,18 +5,28 @@ import argparse
 
 import numpy as np
 
+from contact_deflection.control.decoder_config import StructuredDecoderConfig
 from contact_deflection.envs import ContactDeflectionEnv
+from contact_deflection.envs.contact_deflection_env import ContactDeflectionConfig
+from contact_deflection.rl.train import ensure_workspace
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--steps", type=int, default=100)
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--decoder-config", default="configs/decoder.yaml")
+    parser.add_argument("--workspace", default=None)
     args = parser.parse_args()
-    environment = ContactDeflectionEnv()
+    decoder = StructuredDecoderConfig.load(args.decoder_config)
+    task = ContactDeflectionConfig(decoder=decoder)
+    workspace = ensure_workspace(
+        task, args.workspace or decoder.workspace.cache_path, seed=args.seed
+    )
+    environment = ContactDeflectionEnv(workspace, task)
     observation, _ = environment.reset(seed=args.seed)
     initial_projectile_velocity = environment.projectile_velocity_world
-    action = np.array([0.07, -0.12, 0.06, 0.06, -0.03, 0.05])
+    action = np.zeros(8)
     info = {}
     for _ in range(args.steps):
         observation, _, terminated, truncated, info = environment.step(action)

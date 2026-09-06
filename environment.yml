@@ -15,4 +15,5 @@ dependencies:
   - pip:
       - mujoco>=3.10,<4
       - mink>=1.3,<2
+      - stable-baselines3>=2.5,<3
       - -e .

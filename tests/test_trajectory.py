@@ -7,6 +7,7 @@ from contact_deflection.control.trajectory import (
     JointKinematicState,
     JointTrajectoryLimits,
     PlaceholderTrajectoryGenerator,
+    QuinticTrajectoryGenerator,
 )
 
 
@@ -60,3 +61,22 @@ def test_validate_physical_limit_order_and_sign() -> None:
         JointTrajectoryLimits([1], [-1], [1], [1], [1])
     with pytest.raises(ValueError, match="positive"):
         JointTrajectoryLimits([-1], [1], [1], [1], [0])
+
+
+def test_quintic_generator_matches_terminal_state_without_hiding_infeasibility(
+) -> None:
+    initial = JointKinematicState([0, 0], [0, 0], [0, 0])
+    target = JointKinematicState([0.2, -0.2], [0, 0], [0, 0])
+    result = QuinticTrajectoryGenerator(_limits()).solve(initial, target, 2.0)
+    assert result.trajectory is not None
+    terminal = result.trajectory.sample(2.0)
+    np.testing.assert_allclose(terminal.q, target.q)
+    np.testing.assert_allclose(terminal.qd, target.qd, atol=1e-12)
+    assert result.success
+
+
+def test_quintic_short_duration_reports_missing_reference() -> None:
+    state = JointKinematicState([0, 0], [0, 0])
+    result = QuinticTrajectoryGenerator(_limits()).solve(state, state, 0.0)
+    assert result.trajectory is None
+    assert result.status == "duration_too_short"

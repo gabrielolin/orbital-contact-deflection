@@ -12,16 +12,16 @@ from contact_deflection.control.trajectory import (
     JointKinematicState,
     PlaceholderTrajectoryGenerator,
 )
-from contact_deflection.envs import ContactDeflectionEnv
+from contact_deflection.envs.space_robot_env import SpaceRobotEnv
 from contact_deflection.estimation.projectile_kf import ProjectileKalmanFilter
 from contact_deflection.kinematics.mink_ik import MinkIK
 from contact_deflection.kinematics.reachable_workspace import ReachableWorkspace
 
 
 def test_estimate_to_mink_terminal_solve_preserves_contact_request():
-    env = ContactDeflectionEnv()
+    env = SpaceRobotEnv()
     try:
-        env.reset(seed=0)
+        env._reset_physics()
         before = env.data.qpos.copy()
         ik = MinkIK(env.model)
         position, rotation = ik.pose(before)

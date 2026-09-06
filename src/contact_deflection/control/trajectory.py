@@ -148,3 +148,141 @@ class PlaceholderTrajectoryGenerator:
             success=False,
             status="not_implemented",
         )
+
+
+@dataclass(frozen=True)
+class QuinticJointTrajectory:
+    """Endpoint-interpolating quintic trajectory used by the executable baseline.
+
+    It is deliberately a kinematic reference generator, not the eventual
+    constrained minimum-jerk QP/SQP backend.  Bound checks are reported by the
+    generator and are never hidden through clipping.
+    """
+
+    coefficients: np.ndarray
+    duration: float
+
+    def sample(self, time: float) -> JointKinematicState:
+        clipped_time = float(np.clip(time, 0.0, self.duration))
+        powers = np.array([1.0, clipped_time, clipped_time**2, clipped_time**3,
+                           clipped_time**4, clipped_time**5])
+        velocity_powers = np.array(
+            [0.0, 1.0, 2.0 * clipped_time, 3.0 * clipped_time**2,
+             4.0 * clipped_time**3, 5.0 * clipped_time**4]
+        )
+        acceleration_powers = np.array(
+            [0.0, 0.0, 2.0, 6.0 * clipped_time, 12.0 * clipped_time**2,
+             20.0 * clipped_time**3]
+        )
+        return JointKinematicState(
+            powers @ self.coefficients,
+            velocity_powers @ self.coefficients,
+            acceleration_powers @ self.coefficients,
+        )
+
+
+class QuinticTrajectoryGenerator:
+    """Generate an endpoint quintic and explicitly diagnose limit violations.
+
+    This provides a real control reference for the RL integration without
+    claiming dynamic feasibility.  A later optimization backend can implement
+    the same ``JointTrajectoryGenerator`` protocol.
+    """
+
+    def __init__(self, limits: JointTrajectoryLimits) -> None:
+        self.limits = limits
+
+    def solve(
+        self,
+        initial_state: JointKinematicState,
+        target_state: JointKinematicState,
+        duration: float,
+    ) -> TrajectorySolveResult:
+        lower = np.asarray(self.limits.position_lower, dtype=float)
+        expected = lower.shape
+        initial_q = np.asarray(initial_state.q, dtype=float)
+        initial_qd = np.asarray(initial_state.qd, dtype=float)
+        target_q = np.asarray(target_state.q, dtype=float)
+        target_qd = np.asarray(target_state.qd, dtype=float)
+        if initial_q.shape != expected or target_q.shape != expected:
+            raise ValueError("state and trajectory limit joint counts must agree")
+        if not np.isfinite(duration) or duration < 0:
+            raise ValueError("duration must be finite and nonnegative")
+        if duration <= 1e-6:
+            return TrajectorySolveResult(
+                trajectory=None,
+                requested_duration=float(duration),
+                achieved_duration=None,
+                terminal_position_residual=np.full(expected, np.nan),
+                terminal_velocity_residual=np.full(expected, np.nan),
+                success=False,
+                status="duration_too_short",
+            )
+
+        qdd0 = (
+            np.zeros_like(initial_q)
+            if initial_state.qdd is None
+            else np.asarray(initial_state.qdd, dtype=float)
+        )
+        qdd1 = (
+            np.zeros_like(target_q)
+            if target_state.qdd is None
+            else np.asarray(target_state.qdd, dtype=float)
+        )
+        t = float(duration)
+        boundary = np.array(
+            [
+                initial_q,
+                initial_qd,
+                qdd0,
+                target_q,
+                target_qd,
+                qdd1,
+            ]
+        )
+        system = np.array(
+            [
+                [1, 0, 0, 0, 0, 0],
+                [0, 1, 0, 0, 0, 0],
+                [0, 0, 2, 0, 0, 0],
+                [1, t, t**2, t**3, t**4, t**5],
+                [0, 1, 2 * t, 3 * t**2, 4 * t**3, 5 * t**4],
+                [0, 0, 2, 6 * t, 12 * t**2, 20 * t**3],
+            ],
+            dtype=float,
+        )
+        trajectory = QuinticJointTrajectory(np.linalg.solve(system, boundary), t)
+        samples = [
+            trajectory.sample(sample_time)
+            for sample_time in np.linspace(0, t, 101)
+        ]
+        positions = np.stack([sample.q for sample in samples])
+        velocities = np.stack([sample.qd for sample in samples])
+        accelerations = np.stack(
+            [np.asarray(sample.qdd, dtype=float) for sample in samples]
+        )
+        jerks = np.stack(
+            [
+                6 * trajectory.coefficients[3]
+                + 24 * trajectory.coefficients[4] * sample_time
+                + 60 * trajectory.coefficients[5] * sample_time**2
+                for sample_time in np.linspace(0, t, 101)
+            ]
+        )
+        within_limits = bool(
+            np.all(positions >= self.limits.position_lower)
+            and np.all(positions <= self.limits.position_upper)
+            and np.all(np.abs(velocities) <= self.limits.velocity)
+            and np.all(np.abs(accelerations) <= self.limits.acceleration)
+            and np.all(np.abs(jerks) <= self.limits.jerk)
+        )
+        terminal = trajectory.sample(t)
+        return TrajectorySolveResult(
+            trajectory=trajectory,
+            requested_duration=t,
+            achieved_duration=t,
+            terminal_position_residual=target_q - np.asarray(terminal.q, dtype=float),
+            terminal_velocity_residual=target_qd - np.asarray(terminal.qd, dtype=float),
+            success=within_limits,
+            status="success" if within_limits else "limit_violation",
+        )
