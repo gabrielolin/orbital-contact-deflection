@@ -1,7 +1,7 @@
 """Thin Stable-Baselines3 orchestration for the contact benchmark."""
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import gymnasium as gym
@@ -39,7 +39,11 @@ def ensure_workspace(
     robot = SpaceRobotEnv(task_config.robot)
     try:
         robot._reset_physics()
-        ik = MinkIK(robot.model, task_config.decoder.ik)
+        # Workspace occupancy is position-only; terminal orientation is checked
+        # later by the decoder's full-pose IK solve.
+        ik = MinkIK(
+            robot.model, replace(task_config.decoder.ik, orientation_cost=0.0)
+        )
         fingerprint = workspace_fingerprint(
             ik, robot.data.qpos, task_config.decoder.workspace, seed
         )

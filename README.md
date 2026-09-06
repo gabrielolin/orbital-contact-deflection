@@ -34,7 +34,9 @@ existing environment, run `conda env update -f environment.yml --prune`.
 ## Quick Start
 
 ```bash
-python scripts/sanity_check_env.py --steps 100 --seed 0
+python scripts/build_reachable_workspace.py \
+  --samples 20 \
+  --output outputs/workspace-smoke.npz
 ```
 
 ## Experiments
@@ -43,13 +45,7 @@ Train the initial SB3 SAC baseline (the command creates a workspace cache if
 the configured one is absent):
 
 ```bash
-python scripts/train_sac.py --timesteps 10000 --seed 0
-```
-
-Produce a headless MP4 smoke render with:
-
-```bash
-python scripts/render_episode.py --steps 120 --seed 0 --output videos/smoke.mp4
+python experiments/train_sac.py --timesteps 10000 --seed 0
 ```
 
 ## Repository Structure
@@ -61,6 +57,8 @@ python scripts/render_episode.py --steps 120 --seed 0 --output videos/smoke.mp4
 - `src/contact_deflection/control/`: decoder, kinematic reference, and torque control.
 - `src/contact_deflection/rl/`: thin Stable-Baselines3 training orchestration.
 - `src/contact_deflection/visualization/`: headless frame/video rendering.
+- `experiments/`: training and evaluation orchestration.
+- `scripts/`: durable operational utilities such as workspace generation.
 - `configs/`: explicit simulation and controller parameters.
 - `tests/`: deterministic analytical and simulation checks.
 
@@ -104,17 +102,12 @@ Build a workspace once and export its accepted samples as CSV:
 
 ```bash
 python scripts/build_reachable_workspace.py --config configs/decoder.yaml
-python scripts/decode_contact.py --nominal-line
 ```
 
-The second command uses an explicitly synthetic KF mean through the nominal
-shield position. Without `--nominal-line`, it uses the environment's current
-filter and may report a normal no-intersection result. A small reproducible
-smoke run is:
+A small reproducible workspace smoke run is:
 
 ```bash
 python scripts/build_reachable_workspace.py --samples 20 --output scratch/workspace-smoke.npz
-python scripts/decode_contact.py --workspace scratch/workspace-smoke.npz --nominal-line
 ```
 
 Cache reuse checks a fingerprint of model, IK/sampling settings, seed, and
@@ -149,5 +142,5 @@ bounded terminal twist, quintic joint reference, and PD torque command. It
 requires an explicit base-frame workspace cache; environment reset only places
 that cache at the current base pose. The 49D `float32` observation contains the
 spacecraft-relative KF belief, arm/base state, previous action, corridor
-features, and progress. `scripts/train_sac.py` provides the initial SB3 SAC
+features, and progress. `experiments/train_sac.py` provides the initial SB3 SAC
 loop and records model/evaluation outputs under `outputs/`.

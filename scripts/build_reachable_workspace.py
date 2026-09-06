@@ -6,7 +6,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from contact_deflection.control.decoder_config import StructuredDecoderConfig
-from contact_deflection.envs import ContactDeflectionEnv
+from contact_deflection.envs.space_robot_env import SpaceRobotEnv
 from contact_deflection.kinematics.mink_ik import MinkIK
 from contact_deflection.kinematics.reachable_workspace import (
     ReachableWorkspace,
@@ -28,9 +28,9 @@ def main() -> None:
         settings = replace(settings, sample_count=args.samples)
     if args.output is not None:
         settings = replace(settings, cache_path=args.output)
-    environment = ContactDeflectionEnv()
+    environment = SpaceRobotEnv()
     try:
-        environment.reset(seed=args.seed)
+        environment._reset_physics()
         # Cartesian occupancy deliberately leaves orientation uncosted.
         ik = MinkIK(environment.model, replace(config.ik, orientation_cost=0.0))
         fingerprint = workspace_fingerprint(
