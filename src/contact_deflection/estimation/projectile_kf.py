@@ -5,6 +5,14 @@ from dataclasses import dataclass
 import numpy as np
 import numpy.typing as npt
 
+from contact_deflection.estimation.spacetime_line import (
+    InterceptCorridor,
+    NoReachableWorkspaceIntersection,
+    SpacetimeLine,
+    WorkspaceIntersection,
+    intersect_workspace,
+)
+
 
 @dataclass(frozen=True)
 class ProjectileBelief:
@@ -91,6 +99,14 @@ class ProjectileKalmanFilter:
         return ProjectileBelief(
             self.mean.copy(), self.covariance.copy(), self.timestamp
         )
+
+    def spacetime_line(self) -> SpacetimeLine:
+        return SpacetimeLine(self.mean[:3], self.mean[3:], self.timestamp)
+
+    def intercept_corridor(
+        self, workspace: WorkspaceIntersection, *, horizon: float = 5.0
+    ) -> InterceptCorridor | NoReachableWorkspaceIntersection:
+        return intersect_workspace(self.spacetime_line(), workspace, horizon=horizon)
 
     def relative_belief(
         self,

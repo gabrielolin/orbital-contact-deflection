@@ -67,3 +67,70 @@ with a constant-velocity model. At each sensor update, the current MuJoCo
 spacecraft pose defines a time-varying linear measurement matrix. Spacecraft
 state is treated as known; estimating uncertain spacecraft localization would
 require a later error-state EKF.
+
+## Structured model-based contact interface
+
+`ContactActionDecoder` accepts a `DecoderState`, an estimator `InterceptCorridor`,
+and eight normalized coordinates. It returns the requested contact goal, Mink
+terminal IK, bounded twist mapping, and trajectory-backend diagnostics.
+
+| Coordinate | Meaning |
+|---|---|
+| 0 | Coupled XYZ/time along one reachable mean-path interval |
+| 1–2 | Shield-normal tilt about contact tangent axes |
+| 3–5 | EE linear velocity: normal, tangent1, tangent2 |
+| 6–7 | Angular velocity about tangent1/tangent2; zero scales by default |
+
+The conventions and affine scales are defined in
+`control/contact_action_decoder.py` and `configs/decoder.yaml`. The contact
+frame is `[normal,tangent1,tangent2]`; the MJCF shield's normal is local **+z**.
+World-axis tilt rotations are left-multiplied onto the nominal shield rotation.
+The decoder keeps the previous tangent frame, absolute selected time, and IK
+seed for continuity. Call `decoder.reset()` at episode reset. Supply a belief
+propagated to the current state timestamp. Stationary mean paths retain the
+previous frame, or use an identity contact frame initially.
+
+Build a workspace once and export its accepted samples as CSV:
+
+```bash
+python scripts/build_reachable_workspace.py --config configs/decoder.yaml
+python scripts/decode_contact.py --nominal-line
+```
+
+The second command uses an explicitly synthetic KF mean through the nominal
+shield position. Without `--nominal-line`, it uses the environment's current
+filter and may report a normal no-intersection result. A small reproducible
+smoke run is:
+
+```bash
+python scripts/build_reachable_workspace.py --samples 20 --output scratch/workspace-smoke.npz
+python scripts/decode_contact.py --workspace scratch/workspace-smoke.npz --nominal-line
+```
+
+Cache reuse checks a fingerprint of model, IK/sampling settings, seed, and
+initial configuration. A settings mismatch requires a new output path or
+explicit cache replacement. Samples are stored in spacecraft coordinates;
+`workspace.placed(base_position, base_rotation)` maps them into the current
+world frame. Normal environment startup does not build or load a cache.
+
+Workspace membership is a small union of balls around accepted constrained-IK
+samples. Only the centers are validated: neighborhoods and unsampled regions
+are approximate, and containment is not a guarantee for every orientation.
+Sampling leaves orientation uncosted; terminal IK uses a weighted full
+`FrameTask`. Robot self/spacecraft collision constraints exclude the projectile
+and Mink's welded/adjacent body pairs. The imported model omits joint ranges;
+configured ±2π planning bounds apply there and are not verified hardware limits.
+
+IK and terminal twist mapping freeze the actual current base pose. These are
+kinematic predictions, without floating-base momentum/trajectory prediction.
+Requested position and time always remain on the KF mean line even when IK or
+twist matching fails. No interval shrinking, action resampling, or dynamic
+feasibility rejection is performed. No-intersection is a typed normal result.
+
+`JointTrajectoryGenerator` is an injectable protocol. The default placeholder
+returns `trajectory=None`, `status="not_implemented"`, and NaN residuals meaning
+unknown. It does not yet generate or certify jerk-limited motion. A future
+QP/SQP backend will own this work. Mink uses its bundled DAQP backend only for
+IK; no trajectory solver or RL package is added. The existing six-joint-target
+Gymnasium `step` API remains the execution smoke baseline; the Box(8) decoder
+is a separate model-based interface pending an executable trajectory backend.

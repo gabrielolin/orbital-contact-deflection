@@ -1,0 +1,31 @@
+prediction_horizon: 5.0
+workspace:
+  sample_count: 1000
+  bounds_lower: [0.6, 0.2, 0.95]
+  bounds_upper: [1.6, 1.5, 1.9]
+  radius: 0.025
+  cache_path: outputs/reachable_workspace.npz
+ik:
+  max_iterations: 100
+  iteration_dt: 0.05
+  position_cost: 10.0
+  orientation_cost: 1.0
+  position_tolerance: 0.003
+  orientation_tolerance: 0.03
+  posture_cost: 0.0001
+  velocity_limits: [2, 2, 2, 2, 2, 2]
+  # Used only where the upstream MJCF omits configuration limits.
+  joint_lower: [-6.283185307, -6.283185307, -6.283185307, -6.283185307, -6.283185307, -6.283185307]
+  joint_upper: [6.283185307, 6.283185307, 6.283185307, 6.283185307, 6.283185307, 6.283185307]
+  collision_enabled: true
+  collision_clearance: 0.002
+  collision_detection_distance: 0.05
+decoder:
+  orientation_scales: [0.35, 0.35]
+  linear_velocity_center: [0, 0, 0]
+  linear_velocity_scales: [0.5, 0.25, 0.25]
+  angular_velocity_scales: [0, 0]
+  interval_selection: continuity
+trajectory:
+  acceleration_limits: [5, 5, 5, 5, 5, 5]
+  jerk_limits: [30, 30, 30, 30, 30, 30]

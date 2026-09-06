@@ -9,6 +9,11 @@ import numpy as np
 from contact_deflection.control import PDControllerConfig, TorqueController
 from contact_deflection.envs.space_robot_env import SpaceRobotConfig, SpaceRobotEnv
 from contact_deflection.estimation import ProjectileKalmanFilter
+from contact_deflection.estimation.spacetime_line import (
+    InterceptCorridor,
+    NoReachableWorkspaceIntersection,
+    WorkspaceIntersection,
+)
 
 
 @dataclass(frozen=True)
@@ -121,6 +126,12 @@ class ContactDeflectionEnv(SpaceRobotEnv):
             "projectile_velocity_world": self.projectile_velocity_world,
             "spacecraft_position_world": self.spacecraft_position_world,
         }
+
+    def projectile_intercept_corridor(
+        self, workspace: WorkspaceIntersection, *, horizon: float = 5.0
+    ) -> InterceptCorridor | NoReachableWorkspaceIntersection:
+        """Expose the filter's mean corridor to the model-based decoder."""
+        return self._filter.intercept_corridor(workspace, horizon=horizon)
 
     def step(
         self, action: np.ndarray
