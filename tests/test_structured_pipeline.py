@@ -15,7 +15,7 @@ from contact_deflection.control.trajectory import (
 from contact_deflection.envs.space_robot_env import SpaceRobotEnv
 from contact_deflection.estimation.projectile_kf import ProjectileKalmanFilter
 from contact_deflection.kinematics.mink_ik import MinkIK
-from contact_deflection.kinematics.reachable_workspace import ReachableWorkspace
+from contact_deflection.kinematics.reachable_workspace import EllipsoidalWorkspace
 
 
 def test_estimate_to_mink_terminal_solve_preserves_contact_request():
@@ -32,7 +32,7 @@ def test_estimate_to_mink_terminal_solve_preserves_contact_request():
             acceleration_noise_std=0,
             measurement_noise_std=0.01,
         )
-        workspace = ReachableWorkspace(position[None, :], 0.025)
+        workspace = EllipsoidalWorkspace(position, [0.025, 0.025, 0.025])
         corridor = estimator.intercept_corridor(workspace)
         decoder = ContactActionDecoder(
             ik, PlaceholderTrajectoryGenerator(TrajectoryConfig().limits(ik))

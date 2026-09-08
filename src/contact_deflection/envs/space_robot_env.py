@@ -14,6 +14,19 @@ import numpy.typing as npt
 class SpaceRobotConfig:
     sim_dt: float = 0.001
     policy_dt: float = 0.032
+    initial_arm_q: tuple[float, ...] = (
+        0.0,
+        -np.pi / 2,
+        np.pi / 2,
+        -np.pi / 2,
+        np.pi / 2,
+        0.0,
+    )
+
+    def __post_init__(self) -> None:
+        initial = np.asarray(self.initial_arm_q, dtype=float)
+        if initial.shape != (6,) or not np.all(np.isfinite(initial)):
+            raise ValueError("initial_arm_q must be a finite six-vector")
 
     @property
     def physics_steps_per_action(self) -> int:
@@ -113,6 +126,7 @@ class SpaceRobotEnv(gym.Env[np.ndarray, np.ndarray]):
 
     def _reset_physics(self) -> None:
         mujoco.mj_resetData(self.model, self.data)
+        self.data.qpos[self._arm_qpos_indices] = self.config.initial_arm_q
         projectile_qpos = self.model.jnt_qposadr[self._projectile_joint_id]
         self.data.qpos[projectile_qpos : projectile_qpos + 3] = [0.0, -2.0, 1.7]
         self.data.qpos[projectile_qpos + 3 : projectile_qpos + 7] = [1, 0, 0, 0]

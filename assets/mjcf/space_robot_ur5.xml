@@ -53,7 +53,7 @@ third_party/space_robot_env/LICENSE and THIRD_PARTY.md.
 
                                 <body name="tip_frame" pos="0 0 0.06">
                                     <body name="shield" pos="0 0 0.035">
-                                        <geom name="shield_geom" type="cylinder" size="0.32 0.025" mass="1.5" material="shield_mat" />
+                                        <geom name="shield_geom" type="box" size="0.20 0.20 0.025" mass="1.5" material="shield_mat" />
                                         <site name="shield_center" size="0.025" rgba="0 1 0 1" />
                                     </body>
                                 </body>

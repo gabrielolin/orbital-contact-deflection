@@ -25,7 +25,7 @@ from contact_deflection.estimation.spacetime_line import (
     NoReachableWorkspaceIntersection,
 )
 from contact_deflection.kinematics.mink_ik import MinkIK
-from contact_deflection.kinematics.reachable_workspace import ReachableWorkspace
+from contact_deflection.kinematics.reachable_workspace import EllipsoidalWorkspace
 
 
 @dataclass(frozen=True)
@@ -43,23 +43,20 @@ class ContactDeflectionConfig:
 class ContactDeflectionEnv(SpaceRobotEnv):
     """Free-floating contact task driven by Box(8) structured contact intent.
 
-    ``workspace`` is a base-frame cache generated offline with constrained IK.
-    It is placed at the measured base pose each control step and is never
-    regenerated during reset.
+    A smooth spacecraft-frame candidate envelope defines the contact-time
+    chart. Every selected terminal pose is validated by online constrained IK.
     """
 
     def __init__(
         self,
-        workspace: ReachableWorkspace,
         config: ContactDeflectionConfig | None = None,
         *,
+        workspace: EllipsoidalWorkspace | None = None,
         render_mode: str | None = None,
     ) -> None:
         self.task_config = config if config is not None else ContactDeflectionConfig()
         super().__init__(self.task_config.robot, render_mode=render_mode)
-        if workspace.points.size == 0:
-            raise ValueError("workspace must contain at least one IK-accepted point")
-        self.workspace_B = workspace
+        self.workspace_B = workspace or self.task_config.decoder.workspace.build()
         self.action_space = gym.spaces.Box(-1.0, 1.0, shape=(8,), dtype=np.float32)
         self.observation_space = gym.spaces.Box(
             -np.finfo(np.float32).max, np.finfo(np.float32).max, (49,), np.float32
@@ -74,7 +71,9 @@ class ContactDeflectionEnv(SpaceRobotEnv):
         self.ik = MinkIK(self.model, self.task_config.decoder.ik)
         self.decoder = ContactActionDecoder(
             self.ik,
-            QuinticTrajectoryGenerator(self.task_config.decoder.trajectory.limits(self.ik)),
+            QuinticTrajectoryGenerator(
+                self.task_config.decoder.trajectory.limits(self.ik)
+            ),
             self.task_config.decoder.decoder,
         )
         self._previous_action = np.zeros(8, dtype=float)
@@ -103,7 +102,7 @@ class ContactDeflectionEnv(SpaceRobotEnv):
             )
             self._next_sensor_time += self.task_config.sensor_dt
 
-    def _world_workspace(self) -> ReachableWorkspace:
+    def _world_workspace(self) -> EllipsoidalWorkspace:
         return self.workspace_B.placed(
             self.spacecraft_position_world, self.spacecraft_rotation_world
         )
@@ -158,7 +157,8 @@ class ContactDeflectionEnv(SpaceRobotEnv):
         """Place a constant-velocity projectile through the initial shield center."""
         shield = self.data.site("shield_center")
         normal_W = shield.xmat.reshape(3, 3)[:, 2]
-        velocity = self.task_config.projectile_speed * normal_W
+        # Approach the outward-facing shield from free space in front of it.
+        velocity = -self.task_config.projectile_speed * normal_W
         qpos = self.model.jnt_qposadr[self._projectile_joint_id]
         dof = self.model.jnt_dofadr[self._projectile_joint_id]
         self.data.qpos[qpos : qpos + 3] = (
@@ -228,10 +228,18 @@ class ContactDeflectionEnv(SpaceRobotEnv):
         action_array = np.clip(action_array, -1.0, 1.0)
         decoded = self._decode(action_array)
         self._last_decoded = decoded if isinstance(decoded, DecodedAction) else None
+        ik_feasible = bool(
+            self._last_decoded is not None
+            and self._last_decoded.ik_solution.converged
+            and self._last_decoded.ik_solution.metadata.get(
+                "constraints_satisfied", False
+            )
+        )
         contact = False
         for step_index in range(self.config.physics_steps_per_action):
             if (
-                isinstance(decoded, DecodedAction)
+                ik_feasible
+                and isinstance(decoded, DecodedAction)
                 and decoded.trajectory_result.trajectory
             ):
                 reference = decoded.trajectory_result.trajectory.sample(
@@ -263,11 +271,12 @@ class ContactDeflectionEnv(SpaceRobotEnv):
         reward = 10.0 if contact else -distance - 0.1 * position_residual
         terminated = contact
         truncated = self.data.time >= self.task_config.episode_duration
-        trajectory_status = (
-            self._last_decoded.trajectory_result.status
-            if self._last_decoded is not None
-            else "no_reachable_workspace_intersection"
-        )
+        if self._last_decoded is None:
+            trajectory_status = "no_reachable_workspace_intersection"
+        elif not ik_feasible:
+            trajectory_status = "ik_infeasible"
+        else:
+            trajectory_status = self._last_decoded.trajectory_result.status
         info: dict[str, Any] = {
             "contact_success": float(contact),
             "projectile_shield_distance": distance,
@@ -277,6 +286,7 @@ class ContactDeflectionEnv(SpaceRobotEnv):
                 )
             ),
             "ik_position_residual": position_residual,
+            "ik_converged": float(ik_feasible),
             "twist_residual_norm": (
                 float(np.linalg.norm(self._last_decoded.twist_residual))
                 if self._last_decoded is not None

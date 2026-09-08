@@ -90,6 +90,7 @@ class MinkIK:
             model.geom(i).name
             for i in range(model.ngeom)
             if model.geom(i).name != "projectile_geom"
+            and model.geom(i).group[0] != 2
         ]
         self._collision_limit = mink.CollisionAvoidanceLimit(
             model,

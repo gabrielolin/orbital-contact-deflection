@@ -8,7 +8,7 @@ from contact_deflection.estimation.spacetime_line import (
     intersect_workspace,
 )
 from contact_deflection.geometry.contact_frame import contact_frame
-from contact_deflection.kinematics.reachable_workspace import ReachableWorkspace
+from contact_deflection.kinematics.reachable_workspace import EllipsoidalWorkspace
 
 
 def test_kf_line_and_intersection_keep_seconds_not_distance():
@@ -25,14 +25,14 @@ def test_kf_line_and_intersection_keep_seconds_not_distance():
     np.testing.assert_allclose(p, [5, 0, 0])
     assert t == 12.5
     np.testing.assert_allclose(line.tangent_xyz(), [1, 0, 0])
-    workspace = ReachableWorkspace(np.array([[3.0, 0, 0]]), 0.5)
+    workspace = EllipsoidalWorkspace([3.0, 0, 0], [0.5, 0.5, 0.5])
     corridor = kf.intercept_corridor(workspace)
     assert isinstance(corridor, InterceptCorridor)
     np.testing.assert_allclose(corridor.intervals, [[0.75, 1.25]])
 
 
 def test_stationary_future_and_empty_corridors():
-    workspace = ReachableWorkspace(np.zeros((1, 3)), 0.1)
+    workspace = EllipsoidalWorkspace([0, 0, 0], [0.1, 0.1, 0.1])
     stationary = SpacetimeLine(np.zeros(3), np.zeros(3), 0)
     corridor = intersect_workspace(stationary, workspace, horizon=3)
     assert isinstance(corridor, InterceptCorridor)

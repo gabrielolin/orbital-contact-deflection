@@ -1,10 +1,10 @@
 prediction_horizon: 5.0
 workspace:
-  sample_count: 1000
-  bounds_lower: [0.6, 0.2, 0.95]
-  bounds_upper: [1.6, 1.5, 1.9]
-  radius: 0.025
-  cache_path: outputs/reachable_workspace.npz
+  # Smooth candidate envelope in spacecraft-bus coordinates. Terminal poses
+  # are validated by online constrained IK; this is not a feasibility cache.
+  center: [0.30, 1.30, 0.0]
+  # For the nominal front-on projectile, radii[1] controls corridor length.
+  radii: [0.50, 0.275, 0.50]
 ik:
   max_iterations: 100
   iteration_dt: 0.05

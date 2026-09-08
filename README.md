@@ -12,10 +12,7 @@ The canonical environment is registered as `ContactDeflection-v0`:
 import gymnasium as gym
 import contact_deflection
 
-from contact_deflection.kinematics.reachable_workspace import ReachableWorkspace
-
-workspace = ReachableWorkspace.load("outputs/reachable_workspace.npz")
-env = gym.make("ContactDeflection-v0", workspace=workspace)
+env = gym.make("ContactDeflection-v0")
 observation, info = env.reset(seed=0)
 ```
 
@@ -34,15 +31,12 @@ existing environment, run `conda env update -f environment.yml --prune`.
 ## Quick Start
 
 ```bash
-python scripts/build_reachable_workspace.py \
-  --samples 20 \
-  --output outputs/workspace-smoke.npz
+python scripts/visualize_reachable_workspace.py --config configs/decoder.yaml
 ```
 
 ## Experiments
 
-Train the initial SB3 SAC baseline (the command creates a workspace cache if
-the configured one is absent):
+Train the initial SB3 SAC baseline:
 
 ```bash
 python experiments/train_sac.py --timesteps 10000 --seed 0
@@ -58,17 +52,20 @@ python experiments/train_sac.py --timesteps 10000 --seed 0
 - `src/contact_deflection/rl/`: thin Stable-Baselines3 training orchestration.
 - `src/contact_deflection/visualization/`: headless frame/video rendering.
 - `experiments/`: training and evaluation orchestration.
-- `scripts/`: durable operational utilities such as workspace generation.
+- `scripts/`: durable operational utilities such as workspace visualization.
 - `configs/`: explicit simulation and controller parameters.
 - `tests/`: deterministic analytical and simulation checks.
 
 The arm geometry, inertial chain, and environment structure are adapted from
 SpaceRobotEnv's UR5 model
-at the commit recorded in `THIRD_PARTY.md`. The spacecraft bus remains the
-upstream cuboid approximation rather than a flight-qualified CAD model. The
-projectile is unforced before contact and therefore moves at constant velocity
-in the MuJoCo world frame. Its noisy measurements and policy belief are
-expressed relative to the moving spacecraft.
+at the commit recorded in `THIRD_PARTY.md`. The spacecraft uses a simplified
+1.2 m cuboid bus with visual-only, zero-mass solar-panel wings rather than
+flight-qualified CAD. The UR5 is mounted flush to the bus's +Y front face and
+starts in a folded, outward-facing home posture. The bus retains the original
+200 kg mass and inertia.
+The projectile is unforced before contact and therefore moves at constant
+velocity in the MuJoCo world frame. Its noisy measurements and policy belief
+are expressed relative to the moving spacecraft.
 
 The estimator propagates projectile position and velocity in world coordinates
 with a constant-velocity model. At each sensor update, the current MuJoCo
@@ -98,31 +95,25 @@ seed for continuity. Call `decoder.reset()` at episode reset. Supply a belief
 propagated to the current state timestamp. Stationary mean paths retain the
 previous frame, or use an identity contact frame initially.
 
-Build a workspace once and export its accepted samples as CSV:
+Render the configured smooth workspace envelope as a PNG from the reverse
+overview camera:
 
 ```bash
-python scripts/build_reachable_workspace.py --config configs/decoder.yaml
+python scripts/visualize_reachable_workspace.py --config configs/decoder.yaml
 ```
 
-A small reproducible workspace smoke run is:
-
-```bash
-python scripts/build_reachable_workspace.py --samples 20 --output scratch/workspace-smoke.npz
-```
-
-Cache reuse checks a fingerprint of model, IK/sampling settings, seed, and
-initial configuration. A settings mismatch requires a new output path or
-explicit cache replacement. Samples are stored in spacecraft coordinates;
-`workspace.placed(base_position, base_rotation)` maps them into the current
-world frame. Normal environment startup does not build or load a cache.
-
-Workspace membership is a small union of balls around accepted constrained-IK
-samples. Only the centers are validated: neighborhoods and unsampled regions
-are approximate, and containment is not a guarantee for every orientation.
-Sampling leaves orientation uncosted; terminal IK uses a weighted full
-`FrameTask`. Robot self/spacecraft collision constraints exclude the projectile
-and Mink's welded/adjacent body pairs. The imported model omits joint ranges;
-configured ±2π planning bounds apply there and are not verified hardware limits.
+Override the image path with `--visualization path/to/workspace.png`. The
+ellipsoid center and radii are configured in spacecraft coordinates in
+`configs/decoder.yaml`; it is placed at the current base pose before line
+intersection. For a near-normal projectile, the Y radius is the principal knob
+for contact-corridor length. The smooth envelope defines the continuous action
+chart but is not itself a reachability certificate. Every action-selected pose
+and orientation is checked online with Mink constrained IK; an unsuccessful IK
+proposal is exposed in step diagnostics, incurs the residual penalty, and does
+not drive a best-effort trajectory. Robot
+self/spacecraft collision constraints exclude the projectile and Mink's
+welded/adjacent body pairs. The imported model omits joint ranges; configured
+±2π planning bounds apply there and are not verified hardware limits.
 
 IK and terminal twist mapping freeze the actual current base pose. These are
 kinematic predictions, without floating-base momentum/trajectory prediction.
@@ -139,8 +130,8 @@ replace it behind the same protocol. Mink uses DAQP only for IK.
 `ContactDeflectionEnv` is the canonical Box(8) Gymnasium environment. Every
 policy action is decoded into a KF mean-line contact goal, constrained IK,
 bounded terminal twist, quintic joint reference, and PD torque command. It
-requires an explicit base-frame workspace cache; environment reset only places
-that cache at the current base pose. The 49D `float32` observation contains the
+constructs its smooth base-frame workspace directly from configuration; no
+offline reachability cache is required. The 49D `float32` observation contains the
 spacecraft-relative KF belief, arm/base state, previous action, corridor
 features, and progress. `experiments/train_sac.py` provides the initial SB3 SAC
 loop and records model/evaluation outputs under `outputs/`.
