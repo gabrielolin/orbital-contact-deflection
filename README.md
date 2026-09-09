@@ -310,6 +310,7 @@ Run a larger experiment with the adaptive entropy default:
 python experiments/train_sac.py \
   --timesteps 1000000 \
   --seed 0 \
+  --num-envs 8 \
   --ent-coef auto_0.3 \
   --eval-episodes 20 \
   --render-episodes 3 \
@@ -321,7 +322,12 @@ The command trains `MultiInputPolicy`, saves periodic evaluation data and the
 best periodic model, saves the final checkpoint, evaluates deterministic
 held-out seeds, and renders annotated episodes. Training displays an SB3
 tqdm/rich progress bar by default; pass `--no-progress` for non-interactive log
-files. The output layout is:
+files. Eight independent MuJoCo environments run concurrently by default; set
+`--num-envs 1` for the serial debugging path. Each worker executes its own
+1 ms simulation and 5 ms controller loop, while SAC selects one batched latent
+action per environment every 250 ms. The number of gradient updates remains
+equal to the number of replay-buffer transitions as worker count changes. The
+output layout is:
 
 ```text
 outputs/sac/full_run/

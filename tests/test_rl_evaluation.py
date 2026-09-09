@@ -25,6 +25,12 @@ def test_sac_uses_evidence_based_adaptive_entropy_default() -> None:
     assert config.entropy_coefficient == "auto_0.3"
     assert config.progress_bar
     assert not config.wandb_enabled
+    assert config.num_envs == 8
+
+
+def test_sac_rejects_nonpositive_environment_count() -> None:
+    with pytest.raises(ValueError, match="num_envs"):
+        SACTrainConfig(num_envs=0)
 
 
 def test_evaluation_records_seeded_episode_and_aggregate_metrics() -> None:
