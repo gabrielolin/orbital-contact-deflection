@@ -6,7 +6,7 @@ The central research question is:
 
 > Can a low-frequency learned policy choose **where, when, and how** to contact a projectile while a model-based stack realizes those decisions at control rate—and can the resulting contact achieve a desired outgoing velocity without excessive spacecraft disturbance?
 
-The current approach uses **Soft Actor-Critic (SAC)** to choose a structured end-effector contact intent, while estimation, inverse kinematics, trajectory generation, and torque control remain model-based. This separates **learning contact strategy** from **learning joint-level robot motion**.
+The current approach uses **Soft Actor-Critic (SAC)** to choose a structured end-effector contact intent, while estimation, inverse kinematics, trajectory generation, and torque control remain model-based. This separates **learning contact strategy** from **controlling joint-level robot motion**.
 
 ## Example rollouts
 
