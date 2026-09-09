@@ -213,11 +213,7 @@ $$
 
 The posterior is transformed to spacecraft-relative coordinates before being passed to the policy.
 
-The Gymnasium observation is
-
-$$
-o_t = \lbrace \texttt{observation} \in \mathbb{R}^{49},\; \texttt{desired\_goal} \in \mathbb{R}^3 \rbrace
-$$
+The Gymnasium observation contains `observation` $\in \mathbb{R}^{49}$ and `desired_goal` $\in \mathbb{R}^{3}$.
 
 The 49D observation contains the projectile belief mean and covariance diagonal, arm state, spacecraft pose and twist, previous action, interception-corridor features, and episode progress.
 
