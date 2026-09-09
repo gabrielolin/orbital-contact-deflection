@@ -2,6 +2,7 @@
 
 import mujoco
 import numpy as np
+from scipy.spatial.transform import Rotation
 
 from contact_deflection.envs.space_robot_env import default_scene_path
 from contact_deflection.kinematics.mink_ik import IKConfig, MinkIK
@@ -71,3 +72,20 @@ def test_collision_clearance_is_required_for_acceptance() -> None:
     result = solver.solve(model.qpos0, position, orientation)
     assert not result.converged
     assert not result.metadata["constraints_satisfied"]
+
+
+def test_shield_local_yaw_is_unconstrained() -> None:
+    model = mujoco.MjModel.from_xml_path(str(default_scene_path()))
+    solver = MinkIK(model)
+    position, orientation = solver.pose(model.qpos0)
+    yawed = orientation @ Rotation.from_rotvec([0.0, 0.0, 1.0]).as_matrix()
+
+    result = solver.solve(model.qpos0, position, yawed)
+
+    assert result.converged
+    assert result.orientation_residual < 1e-8
+    np.testing.assert_allclose(
+        result.q_target, model.qpos0[solver.arm_qpos_indices], atol=1e-12
+    )
+    assert result.metadata["orientation_constraint"] == "shield_normal"
+    assert not result.metadata["local_yaw_constrained"]

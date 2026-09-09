@@ -39,8 +39,8 @@ class WorkspaceConfig:
     the front/back extent and therefore for a near-normal projectile corridor.
     """
 
-    center: tuple[float, float, float] = (0.30, 1.30, 0.0)
-    radii: tuple[float, float, float] = (0.50, 0.275, 0.50)
+    center: tuple[float, float, float] = (0.15, 1.30, 0.0)
+    radii: tuple[float, float, float] = (0.60, 0.30, 0.70)
 
     def __post_init__(self) -> None:
         _vector(self.center, "workspace center")

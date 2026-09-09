@@ -2,6 +2,8 @@
 
 No environment data or model limits are modified. Differential IK QPs are
 restricted algebraically to arm columns, locking base and projectile exactly.
+The shield task constrains its position and local +z contact normal, while
+leaving rotation about that normal free for the redundant wrist posture.
 The upstream UR5 MJCF omits joint limits: configurable +/-2 pi fallback bounds
 are planning assumptions, not a claim of model-enforced hardware limits.
 """
@@ -27,7 +29,7 @@ class IKConfig:
     orientation_tolerance: float = 0.03
     posture_cost: float = 1e-4
     damping: float = 1e-5
-    velocity_limits: tuple[float, ...] = (2.0,) * 6
+    velocity_limits: tuple[float, ...] = (4.0,) * 6
     joint_lower: tuple[float, ...] = (-2 * np.pi,) * 6
     joint_upper: tuple[float, ...] = (2 * np.pi,) * 6
     collision_enabled: bool = True
@@ -46,7 +48,7 @@ class IKSolution:
 
 
 class MinkIK:
-    """Best-effort pose IK; robot-pose prediction during motion is downstream."""
+    """Best-effort position/normal IK; motion prediction is downstream."""
 
     def __init__(self, model: mujoco.MjModel, config: IKConfig | None = None):
         self.model = model
@@ -179,11 +181,18 @@ class MinkIK:
             initial[self.arm_qpos_indices], self.joint_lower, self.joint_upper
         )
         self.configuration.update(initial)
+        # FrameTask errors are body-frame twists, so its third rotational
+        # coordinate is rotation about the shield site's local +z contact
+        # normal. Do not spend wrist reach matching the decoder chart's
+        # arbitrary tangent-frame yaw.
+        orientation_cost = np.array(
+            [cfg.orientation_cost, cfg.orientation_cost, 0.0], dtype=float
+        )
         frame = mink.FrameTask(
             "shield_center",
             "site",
             cfg.position_cost,
-            cfg.orientation_cost,
+            orientation_cost,
             lm_damping=cfg.damping,
         )
         frame.set_target(
@@ -203,9 +212,10 @@ class MinkIK:
             data = self.configuration.data
             pos_error = float(np.linalg.norm(data.site_xpos[self.site_id] - position))
             actual = data.site_xmat[self.site_id].reshape(3, 3)
-            rot_error = float(
-                np.linalg.norm(mink.SO3.from_matrix(orientation.T @ actual).log())
-            )
+            # The contact geometry depends on the shield normal, not its yaw.
+            # This angle is invariant to rotations about either aligned normal.
+            normal_dot = float(np.dot(orientation[:, 2], actual[:, 2]))
+            rot_error = float(np.arccos(np.clip(normal_dot, -1.0, 1.0)))
             valid, clearance = self._constraints()
             score = (
                 not valid,
@@ -294,5 +304,7 @@ class MinkIK:
                 "collision_pairs": len(self._collision_limit.geom_id_pairs),
                 "fallback_joint_limits": self._uses_fallback_limits,
                 "base_model": "frozen_current_pose",
+                "orientation_constraint": "shield_normal",
+                "local_yaw_constrained": False,
             },
         )

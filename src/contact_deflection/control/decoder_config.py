@@ -13,8 +13,8 @@ from contact_deflection.kinematics.reachable_workspace import WorkspaceConfig
 
 @dataclass(frozen=True)
 class TrajectoryConfig:
-    acceleration_limits: tuple[float, ...] = (5.0,) * 6
-    jerk_limits: tuple[float, ...] = (30.0,) * 6
+    acceleration_limits: tuple[float, ...] = (15.0,) * 6
+    jerk_limits: tuple[float, ...] = (120.0,) * 6
 
     def limits(self, ik: MinkIK) -> JointTrajectoryLimits:
         return JointTrajectoryLimits(

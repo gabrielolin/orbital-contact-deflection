@@ -25,6 +25,8 @@ from contact_deflection.estimation import ProjectileKalmanFilter
 from contact_deflection.estimation.spacetime_line import (
     InterceptCorridor,
     NoReachableWorkspaceIntersection,
+    SpacetimeLine,
+    intersect_workspace,
 )
 from contact_deflection.geometry.contact_frame import contact_frame
 from contact_deflection.kinematics.mink_ik import MinkIK
@@ -100,9 +102,20 @@ class EpisodeRandomizationConfig:
     shield_mass_mean: float = 4.50
     shield_mass_std: float = 0.30
     shield_mass_minimum: float = 0.50
-    projectile_position_mean_shield: tuple[float, float, float] = (0.0, 0.0, 3.0)
-    projectile_position_std: tuple[float, float, float] = (0.05, 0.05, 0.15)
+    # Initial offset from the workspace center, expressed in initial shield
+    # axes. Local +z is outward from the shield toward the projectile.
+    projectile_position_offset_mean_shield: tuple[float, float, float] = (
+        0.0,
+        0.0,
+        3.0,
+    )
+    projectile_position_offset_std_shield: tuple[float, float, float] = (
+        0.28,
+        0.34,
+        0.15,
+    )
     projectile_velocity_component_std: float = 0.10
+    projectile_workspace_margin: float = 0.95
     arm_position_std: float = 0.02
     spacecraft_linear_velocity_std: float = 0.005
     spacecraft_angular_velocity_std: float = 0.002
@@ -141,17 +154,23 @@ class EpisodeRandomizationConfig:
             or self.shield_mass_mean <= self.shield_mass_minimum
         ):
             raise ValueError("Gaussian means must exceed their rejection floors")
-        position_mean = np.asarray(self.projectile_position_mean_shield, dtype=float)
-        position_std = np.asarray(self.projectile_position_std, dtype=float)
+        position_mean = np.asarray(
+            self.projectile_position_offset_mean_shield, dtype=float
+        )
+        position_std = np.asarray(
+            self.projectile_position_offset_std_shield, dtype=float
+        )
         if (
             position_mean.shape != (3,)
             or position_std.shape != (3,)
             or not np.all(np.isfinite(position_mean))
             or not np.all(np.isfinite(position_std))
             or np.any(position_std < 0)
+            or position_mean[2] <= 0
+            or not 0 < self.projectile_workspace_margin <= 1
         ):
             raise ValueError(
-                "projectile position distribution must be finite 3-vectors"
+                "projectile position distribution and workspace margin are invalid"
             )
 
 
@@ -170,7 +189,7 @@ class ContactDeflectionConfig:
         default_factory=lambda: PDControllerConfig(
             kp=[35, 35, 30, 20, 15, 10],
             kd=[5, 5, 4.5, 3, 2.5, 2],
-            torque_limits=[150, 150, 150, 28, 28, 28],
+            torque_limits=[250, 250, 200, 50, 50, 50],
         )
     )
     sensor_dt: float = 0.01
@@ -451,25 +470,49 @@ class ContactDeflectionEnv(SpaceRobotEnv):
         mujoco.mj_forward(self.model, self.data)
 
     def _set_episode_projectile(self) -> None:
-        """Sample an incoming line aimed near the initial shield center."""
+        """Sample a broad incoming line conditioned to cross the workspace."""
         shield = self.data.site("shield_center")
         shield_rotation = shield.xmat.reshape(3, 3)
         normal_W = shield_rotation[:, 2]
         randomization = self.task_config.episode_randomization
-        # Approach the outward-facing shield from free space in front of it.
-        velocity = (
-            -self.task_config.projectile_speed * normal_W
-            + self.np_random.normal(
-                0.0, randomization.projectile_velocity_component_std, size=3
+        workspace = self._world_workspace()
+        sampling_workspace = EllipsoidalWorkspace(
+            workspace.center,
+            randomization.projectile_workspace_margin * workspace.radii,
+            workspace.rotation,
+        )
+        for _ in range(10_000):
+            # Approach the outward-facing shield from free space in front of it.
+            velocity = (
+                -self.task_config.projectile_speed * normal_W
+                + self.np_random.normal(
+                    0.0, randomization.projectile_velocity_component_std, size=3
+                )
             )
-        )
-        if velocity @ normal_W >= 0:
-            raise RuntimeError("sampled projectile does not approach the shield")
-        position_shield = self.np_random.normal(
-            np.asarray(randomization.projectile_position_mean_shield, dtype=float),
-            np.asarray(randomization.projectile_position_std, dtype=float),
-        )
-        position_world = shield.xpos + shield_rotation @ position_shield
+            offset_shield = self.np_random.normal(
+                np.asarray(
+                    randomization.projectile_position_offset_mean_shield,
+                    dtype=float,
+                ),
+                np.asarray(
+                    randomization.projectile_position_offset_std_shield,
+                    dtype=float,
+                ),
+            )
+            position_world = workspace.center + shield_rotation @ offset_shield
+            line = SpacetimeLine(position_world, velocity, self.data.time)
+            if velocity @ normal_W < 0 and isinstance(
+                intersect_workspace(
+                    line,
+                    sampling_workspace,
+                    horizon=self.task_config.decoder.prediction_horizon,
+                ),
+                InterceptCorridor,
+            ):
+                break
+        else:
+            raise RuntimeError("could not sample a projectile crossing the workspace")
+        position_shield = shield_rotation.T @ (position_world - shield.xpos)
         qpos = self.model.jnt_qposadr[self._projectile_joint_id]
         dof = self.model.jnt_dofadr[self._projectile_joint_id]
         self.data.qpos[qpos : qpos + 3] = position_world
@@ -482,6 +525,9 @@ class ContactDeflectionEnv(SpaceRobotEnv):
                 "projectile_velocity_world": velocity.copy(),
                 "projectile_initial_position_world": position_world.copy(),
                 "projectile_initial_position_shield": position_shield.copy(),
+                "projectile_initial_offset_from_workspace_shield": (
+                    offset_shield.copy()
+                ),
                 "initial_arm_q": self.arm_q,
                 "initial_arm_qd": self.arm_qd,
                 "initial_spacecraft_velocity_world": (

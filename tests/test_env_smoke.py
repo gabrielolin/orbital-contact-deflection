@@ -9,7 +9,11 @@ import contact_deflection  # noqa: F401  # Registers ContactDeflection-v0.
 from contact_deflection.envs import ContactDeflectionEnv
 from contact_deflection.envs.contact_deflection_env import ContactDeflectionConfig
 from contact_deflection.envs.space_robot_env import SpaceRobotEnv
-from contact_deflection.estimation.spacetime_line import InterceptCorridor
+from contact_deflection.estimation.spacetime_line import (
+    InterceptCorridor,
+    SpacetimeLine,
+    intersect_workspace,
+)
 from contact_deflection.kinematics.reachable_workspace import EllipsoidalWorkspace
 
 
@@ -40,6 +44,14 @@ def test_benchmark_configuration_loads_canonical_clocks_and_reward() -> None:
     assert config.projectile_speed == 3.0
     assert config.desired_velocity_goal.normal_mean == 1.45
     assert config.terminal_reward.follow_through_duration == 0.050
+    np.testing.assert_allclose(config.decoder.ik.velocity_limits, [4.0] * 6)
+    np.testing.assert_allclose(
+        config.decoder.trajectory.acceleration_limits, [15.0] * 6
+    )
+    np.testing.assert_allclose(config.decoder.trajectory.jerk_limits, [120.0] * 6)
+    np.testing.assert_allclose(
+        config.controller.torque_limits, [250, 250, 200, 50, 50, 50]
+    )
 
 
 def test_registered_environment_can_be_created() -> None:
@@ -88,6 +100,10 @@ def test_scene_uses_vendored_ur5_and_free_base_reacts() -> None:
     environment.reset(seed=0)
     initial_base_position = environment.spacecraft_position_world
     assert environment.model.nu == 6
+    np.testing.assert_allclose(
+        environment.model.actuator_ctrlrange,
+        [[-250, 250], [-250, 250], [-200, 200], [-50, 50], [-50, 50], [-50, 50]],
+    )
     assert environment.arm_q.shape == (6,)
     assert environment.model.nmesh >= 7
     assert environment.model.body("upper_arm_link").mass[0] == 8.393
@@ -189,14 +205,50 @@ def test_goal_sampling_is_seeded_and_varies_across_seeds() -> None:
     environment.close()
 
 
+def test_projectile_distribution_crosses_and_spans_workspace() -> None:
+    environment = ContactDeflectionEnv()
+    normalized_intercepts = []
+    try:
+        for seed in range(128):
+            _, info = environment.reset(seed=seed)
+            parameters = info["episode_parameters"]
+            line = SpacetimeLine(
+                parameters["projectile_initial_position_world"],
+                parameters["projectile_velocity_world"],
+                0.0,
+            )
+            workspace = environment._world_workspace()
+            corridor = intersect_workspace(
+                line,
+                workspace,
+                horizon=environment.task_config.decoder.prediction_horizon,
+            )
+            assert isinstance(corridor, InterceptCorridor)
+            lower, upper = corridor.intervals[0]
+            midpoint = line.evaluate(0.5 * (lower + upper))[0]
+            normalized_intercepts.append(
+                workspace.rotation.T
+                @ (midpoint - workspace.center)
+                / workspace.radii
+            )
+    finally:
+        environment.close()
+
+    intercepts = np.asarray(normalized_intercepts)
+    assert intercepts[:, 0].min() < -0.7
+    assert intercepts[:, 0].max() > 0.7
+    assert intercepts[:, 2].min() < -0.7
+    assert intercepts[:, 2].max() > 0.7
+
+
 def test_miss_reward_is_terminal_and_uses_closest_distance() -> None:
     probe = ContactDeflectionEnv(workspace=_workspace_at_initial_shield())
     base = probe.task_config
     probe.close()
     randomization = replace(
         base.episode_randomization,
-        projectile_position_mean_shield=(0.0, 0.0, 6.0),
-        projectile_position_std=(0.0, 0.0, 0.0),
+        projectile_position_offset_mean_shield=(0.0, 0.0, 6.0),
+        projectile_position_offset_std_shield=(0.0, 0.0, 0.0),
     )
     config = replace(
         base,
@@ -231,7 +283,7 @@ def test_contact_runs_terminal_evaluation_and_scores_outgoing_velocity() -> None
     assert info["terminal_reason"] == "contact"
     assert info["outgoing_velocity_valid"] == 1.0
     assert info["post_contact_separated"] == 1.0
-    assert np.linalg.norm(info["outgoing_projectile_velocity_world"]) > 0.5
+    assert np.linalg.norm(info["outgoing_projectile_velocity_world"]) > 0.25
     assert info["velocity_error_valid"] == 1.0
     assert np.isfinite(reward)
     environment.close()

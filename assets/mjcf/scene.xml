@@ -67,16 +67,16 @@
   </worldbody>
   <actuator>
     <motor name="shoulder_pan_motor" joint="arm:shoulder_pan_joint"
-           gear="1" ctrlrange="-150 150"/>
+           gear="1" ctrlrange="-250 250"/>
     <motor name="shoulder_lift_motor" joint="arm:shoulder_lift_joint"
-           gear="1" ctrlrange="-150 150"/>
+           gear="1" ctrlrange="-250 250"/>
     <motor name="elbow_motor" joint="arm:elbow_joint"
-           gear="1" ctrlrange="-150 150"/>
+           gear="1" ctrlrange="-200 200"/>
     <motor name="wrist_1_motor" joint="arm:wrist_1_joint"
-           gear="1" ctrlrange="-28 28"/>
+           gear="1" ctrlrange="-50 50"/>
     <motor name="wrist_2_motor" joint="arm:wrist_2_joint"
-           gear="1" ctrlrange="-28 28"/>
+           gear="1" ctrlrange="-50 50"/>
     <motor name="wrist_3_motor" joint="arm:wrist_3_joint"
-           gear="1" ctrlrange="-28 28"/>
+           gear="1" ctrlrange="-50 50"/>
   </actuator>
 </mujoco>

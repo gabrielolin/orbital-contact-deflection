@@ -19,6 +19,9 @@ class SACTrainConfig:
     run_dir: str = "outputs/sac"
     evaluation_frequency: int = 5_000
     evaluation_episodes: int = 5
+    # The fixed 0.01 probe under-explored. The successful automatic-entropy
+    # probe converged near 0.325, so initialize adaptive tuning close to 0.3.
+    entropy_coefficient: str | float = "auto_0.3"
 
 
 def environment_factory(
@@ -74,7 +77,13 @@ def train_sac(
         deterministic=True,
     )
     try:
-        model = SAC("MultiInputPolicy", environment, seed=settings.seed, verbose=1)
+        model = SAC(
+            "MultiInputPolicy",
+            environment,
+            seed=settings.seed,
+            ent_coef=settings.entropy_coefficient,
+            verbose=1,
+        )
         model.learn(total_timesteps=settings.total_timesteps, callback=callback)
         model_path = run_dir / "final_model"
         model.save(str(model_path))
