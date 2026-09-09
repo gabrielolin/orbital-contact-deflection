@@ -52,6 +52,12 @@ def train_sac(
         "ik_converged",
         "ik_position_residual",
         "trajectory_feasible",
+        "velocity_error",
+        "velocity_score",
+        "miss_distance_penalty",
+        "spacecraft_angular_momentum_delta",
+        "angular_momentum_penalty",
+        "post_contact_separated",
     )
     environment = DummyVecEnv(
         [lambda: Monitor(ContactDeflectionEnv(task_config), info_keywords=monitor_keys)]
@@ -68,7 +74,7 @@ def train_sac(
         deterministic=True,
     )
     try:
-        model = SAC("MlpPolicy", environment, seed=settings.seed, verbose=1)
+        model = SAC("MultiInputPolicy", environment, seed=settings.seed, verbose=1)
         model.learn(total_timesteps=settings.total_timesteps, callback=callback)
         model_path = run_dir / "final_model"
         model.save(str(model_path))

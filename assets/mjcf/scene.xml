@@ -6,7 +6,7 @@
   <default>
     <joint damping="0.25" armature="0.03"/>
     <geom condim="3" friction="0.6 0.01 0.001"
-          solref="0.01 1" solimp="0.9 0.95 0.001"/>
+          solref="0.01 0.1" solimp="0.98 0.995 0.0005 0.5 2"/>
     <motor ctrllimited="true"/>
     <default class="arm1"><joint damping="0.25"/></default>
     <default class="arm2"><joint damping="0.25"/></default>
@@ -62,7 +62,7 @@
     <body name="projectile" pos="0 -2 1.7">
       <freejoint name="projectile_free"/>
       <geom name="projectile_geom" type="sphere" size="0.1"
-            mass="0.5" material="projectile_mat"/>
+            mass="1.5" material="projectile_mat"/>
     </body>
   </worldbody>
   <actuator>

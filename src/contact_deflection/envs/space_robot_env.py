@@ -13,7 +13,8 @@ import numpy.typing as npt
 @dataclass(frozen=True)
 class SpaceRobotConfig:
     sim_dt: float = 0.001
-    policy_dt: float = 0.032
+    control_dt: float = 0.005
+    policy_dt: float = 0.250
     initial_arm_q: tuple[float, ...] = (
         0.0,
         -np.pi / 2,
@@ -27,21 +28,33 @@ class SpaceRobotConfig:
         initial = np.asarray(self.initial_arm_q, dtype=float)
         if initial.shape != (6,) or not np.all(np.isfinite(initial)):
             raise ValueError("initial_arm_q must be a finite six-vector")
+        if self.sim_dt <= 0 or self.control_dt <= 0 or self.policy_dt <= 0:
+            raise ValueError("simulation, control, and policy periods must be positive")
+        self._integer_ratio(self.control_dt, self.sim_dt, "control_dt/sim_dt")
+        self._integer_ratio(self.policy_dt, self.control_dt, "policy_dt/control_dt")
+
+    @staticmethod
+    def _integer_ratio(numerator: float, denominator: float, name: str) -> int:
+        ratio = numerator / denominator
+        rounded = round(ratio)
+        if not np.isclose(ratio, rounded):
+            raise ValueError(f"{name} must be an integer")
+        return rounded
+
+    @property
+    def physics_steps_per_control(self) -> int:
+        return self._integer_ratio(self.control_dt, self.sim_dt, "control_dt/sim_dt")
 
     @property
     def physics_steps_per_action(self) -> int:
-        ratio = self.policy_dt / self.sim_dt
-        steps = round(ratio)
-        if not np.isclose(ratio, steps):
-            raise ValueError("policy_dt must be an integer multiple of sim_dt")
-        return steps
+        return self._integer_ratio(self.policy_dt, self.sim_dt, "policy_dt/sim_dt")
 
 
 def default_scene_path() -> Path:
     return Path(__file__).resolve().parents[3] / "assets" / "mjcf" / "scene.xml"
 
 
-class SpaceRobotEnv(gym.Env[np.ndarray, np.ndarray]):
+class SpaceRobotEnv(gym.Env[Any, np.ndarray]):
     """Base environment preserving SpaceRobotEnv's simple MuJoCo ownership model."""
 
     metadata = {"render_modes": ["rgb_array"], "render_fps": 30}
@@ -120,6 +133,12 @@ class SpaceRobotEnv(gym.Env[np.ndarray, np.ndarray]):
         return self.data.qvel[dof + 3 : dof + 6].copy()
 
     @property
+    def spacecraft_angular_momentum_world(self) -> np.ndarray:
+        """Angular momentum of the bus-and-arm subtree about its center of mass."""
+        mujoco.mj_subtreeVel(self.model, self.data)
+        return self.data.subtree_angmom[self._spacecraft_body_id].copy()
+
+    @property
     def spacecraft_quaternion_world(self) -> np.ndarray:
         qpos = self.model.jnt_qposadr[self._spacecraft_joint_id]
         return self.data.qpos[qpos + 3 : qpos + 7].copy()
@@ -164,10 +183,10 @@ class SpaceRobotEnv(gym.Env[np.ndarray, np.ndarray]):
         *,
         seed: int | None = None,
         options: dict[str, Any] | None = None,
-    ) -> tuple[np.ndarray, dict[str, Any]]:
+    ) -> tuple[Any, dict[str, Any]]:
         raise NotImplementedError
 
     def step(
         self, action: np.ndarray
-    ) -> tuple[np.ndarray, float, bool, bool, dict[str, Any]]:
+    ) -> tuple[Any, float, bool, bool, dict[str, Any]]:
         raise NotImplementedError

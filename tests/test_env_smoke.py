@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 import gymnasium as gym
 import mujoco
 import numpy as np
@@ -5,6 +7,7 @@ from gymnasium.utils.env_checker import check_env
 
 import contact_deflection  # noqa: F401  # Registers ContactDeflection-v0.
 from contact_deflection.envs import ContactDeflectionEnv
+from contact_deflection.envs.contact_deflection_env import ContactDeflectionConfig
 from contact_deflection.envs.space_robot_env import SpaceRobotEnv
 from contact_deflection.estimation.spacetime_line import InterceptCorridor
 from contact_deflection.kinematics.reachable_workspace import EllipsoidalWorkspace
@@ -29,10 +32,22 @@ def test_environment_passes_gymnasium_checker() -> None:
     environment.close()
 
 
+def test_benchmark_configuration_loads_canonical_clocks_and_reward() -> None:
+    config = ContactDeflectionConfig.load("configs/env.yaml")
+    assert config.robot.sim_dt == 0.001
+    assert config.robot.control_dt == 0.005
+    assert config.robot.policy_dt == 0.250
+    assert config.projectile_speed == 3.0
+    assert config.desired_velocity_goal.normal_mean == 1.45
+    assert config.terminal_reward.follow_through_duration == 0.050
+
+
 def test_registered_environment_can_be_created() -> None:
     environment = gym.make("ContactDeflection-v0")
     observation, _ = environment.reset(seed=0)
-    assert observation.shape == (49,)
+    assert set(observation) == {"observation", "desired_goal"}
+    assert observation["observation"].shape == (49,)
+    assert observation["desired_goal"].shape == (3,)
     assert environment.action_space.shape == (8,)
     corridor = environment.unwrapped.projectile_intercept_corridor()
     assert isinstance(corridor, InterceptCorridor)
@@ -52,17 +67,20 @@ def test_reset_and_steps_are_deterministic() -> None:
     for environment in environments:
         observation, _ = environment.reset(seed=7)
         assert environment.observation_space.contains(observation)
-        for _ in range(10):
+        for _ in range(2):
             observation, reward, terminated, truncated, _ = environment.step(
                 np.full(8, 0.05, dtype=np.float32)
             )
-            assert np.all(np.isfinite(observation))
+            assert all(np.all(np.isfinite(value)) for value in observation.values())
             assert np.isfinite(reward)
             assert not terminated
             assert not truncated
         final_observations.append(observation)
         environment.close()
-    np.testing.assert_allclose(final_observations[0], final_observations[1])
+    for key in final_observations[0]:
+        np.testing.assert_allclose(
+            final_observations[0][key], final_observations[1][key]
+        )
 
 
 def test_scene_uses_vendored_ur5_and_free_base_reacts() -> None:
@@ -85,6 +103,7 @@ def test_scene_uses_vendored_ur5_and_free_base_reacts() -> None:
     np.testing.assert_allclose(
         environment.arm_q,
         [0.0, -np.pi / 2, np.pi / 2, -np.pi / 2, np.pi / 2, 0.0],
+        atol=0.08,
     )
     shield = environment.data.site("shield_center")
     assert shield.xpos[1] > 0.60
@@ -99,7 +118,11 @@ def test_scene_uses_vendored_ur5_and_free_base_reacts() -> None:
     np.testing.assert_allclose(
         environment.model.geom("shield_geom").size, [0.20, 0.20, 0.025]
     )
-    for _ in range(5):
+    assert 3.0 < environment.model.body("shield").mass[0] < 6.0
+    assert 0.75 < environment.model.body("projectile").mass[0] < 2.25
+    assert 0.005 < environment.model.geom("shield_geom").solref[0] < 0.015
+    assert 0.05 < environment.model.geom("shield_geom").solref[1] < 0.15
+    for _ in range(2):
         environment.step(np.full(8, 0.2, dtype=np.float32))
     assert (
         np.linalg.norm(environment.spacecraft_position_world - initial_base_position)
@@ -112,10 +135,103 @@ def test_projectile_is_unforced_before_contact() -> None:
     environment = ContactDeflectionEnv(workspace=_workspace_at_initial_shield())
     environment.reset(seed=0)
     initial_velocity = environment.projectile_velocity_world
-    for _ in range(5):
+    for _ in range(2):
         _, _, terminated, _, _ = environment.step(np.zeros(8, dtype=np.float32))
         assert not terminated
     np.testing.assert_allclose(
         environment.projectile_velocity_world, initial_velocity, atol=1e-12
     )
+    environment.close()
+
+
+def test_macro_step_uses_policy_and_control_clocks() -> None:
+    environment = ContactDeflectionEnv(workspace=_workspace_at_initial_shield())
+    environment.reset(seed=0)
+    control_calls = 0
+    original_compute = environment.controller.compute
+
+    def counting_compute(*args: object, **kwargs: object) -> np.ndarray:
+        nonlocal control_calls
+        control_calls += 1
+        return original_compute(*args, **kwargs)
+
+    environment.controller.compute = counting_compute  # type: ignore[method-assign]
+    _, reward, terminated, truncated, _ = environment.step(np.zeros(8))
+    assert np.isclose(environment.data.time, 0.250)
+    assert control_calls == 50
+    assert reward == 0.0
+    assert not terminated
+    assert not truncated
+    environment.close()
+
+
+def test_goal_sampling_is_seeded_and_varies_across_seeds() -> None:
+    environment = ContactDeflectionEnv(workspace=_workspace_at_initial_shield())
+    first, first_info = environment.reset(seed=11)
+    repeated, repeated_info = environment.reset(seed=11)
+    different, different_info = environment.reset(seed=12)
+    np.testing.assert_allclose(first["desired_goal"], repeated["desired_goal"])
+    assert not np.allclose(first["desired_goal"], different["desired_goal"])
+    assert 0.75 <= np.linalg.norm(first["desired_goal"]) <= 2.50
+    for key, value in first_info["episode_parameters"].items():
+        np.testing.assert_allclose(value, repeated_info["episode_parameters"][key])
+    assert first_info["episode_parameters"]["projectile_mass"] != (
+        different_info["episode_parameters"]["projectile_mass"]
+    )
+    assert np.linalg.norm(
+        first_info["episode_parameters"]["projectile_velocity_world"]
+    ) > 2.5
+    np.testing.assert_array_equal(
+        first_info["episode_parameters"]["initial_arm_qd"], np.zeros(6)
+    )
+    assert "projectile_lead_time" not in first_info["episode_parameters"]
+    assert not hasattr(environment.task_config, "projectile_lead_time")
+    environment.close()
+
+
+def test_miss_reward_is_terminal_and_uses_closest_distance() -> None:
+    probe = ContactDeflectionEnv(workspace=_workspace_at_initial_shield())
+    base = probe.task_config
+    probe.close()
+    randomization = replace(
+        base.episode_randomization,
+        projectile_position_mean_shield=(0.0, 0.0, 6.0),
+        projectile_position_std=(0.0, 0.0, 0.0),
+    )
+    config = replace(
+        base,
+        episode_duration=0.250,
+        episode_randomization=randomization,
+    )
+    environment = ContactDeflectionEnv(
+        config=config, workspace=_workspace_at_initial_shield()
+    )
+    environment.reset(seed=0)
+    _, reward, terminated, truncated, info = environment.step(np.zeros(8))
+    assert terminated
+    assert not truncated
+    assert reward < -1.0
+    assert info["terminal_reason"] == "miss"
+    assert info["miss_distance_penalty"] > 0.0
+    environment.close()
+
+
+def test_contact_runs_terminal_evaluation_and_scores_outgoing_velocity() -> None:
+    environment = ContactDeflectionEnv()
+    environment.reset(seed=7)
+    rewards = []
+    for _ in range(8):
+        _, reward, terminated, truncated, info = environment.step(np.zeros(8))
+        rewards.append(reward)
+        if terminated or truncated:
+            break
+    assert rewards[:-1] == [0.0] * (len(rewards) - 1)
+    assert terminated
+    assert not truncated
+    assert info["terminal_reason"] == "contact"
+    assert info["outgoing_velocity_valid"] == 1.0
+    assert info["post_contact_separated"] == 1.0
+    assert np.linalg.norm(info["outgoing_projectile_velocity_world"]) > 0.5
+    assert info["velocity_error_valid"] == 1.0
+    assert np.isfinite(reward)
     environment.close()

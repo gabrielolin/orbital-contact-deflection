@@ -131,7 +131,15 @@ replace it behind the same protocol. Mink uses DAQP only for IK.
 policy action is decoded into a KF mean-line contact goal, constrained IK,
 bounded terminal twist, quintic joint reference, and PD torque command. It
 constructs its smooth base-frame workspace directly from configuration; no
-offline reachability cache is required. The 49D `float32` observation contains the
-spacecraft-relative KF belief, arm/base state, previous action, corridor
-features, and progress. `experiments/train_sac.py` provides the initial SB3 SAC
-loop and records model/evaluation outputs under `outputs/`.
+offline reachability cache is required. The environment returns a dictionary
+with a 49D `observation` vector and a 3D `desired_goal` outgoing-projectile
+velocity expressed in the current spacecraft axes. SAC uses SB3's
+`MultiInputPolicy`. Each policy action controls a 250 ms trajectory prefix,
+while torque references update every 5 ms and MuJoCo integrates at 1 ms.
+Rewards are zero before termination and score outgoing-velocity error, miss
+closest approach, and spacecraft angular-momentum transfer at termination.
+Every seeded reset samples the initial projectile line, arm state, spacecraft
+rates, projectile and shield masses, and stable MuJoCo contact parameters from
+the Gaussian distributions in `configs/env.yaml`. The resolved episode values
+are returned in `info["episode_parameters"]` for reproducibility.
+`experiments/train_sac.py` records model/evaluation outputs under `outputs/`.
