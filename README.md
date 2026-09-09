@@ -178,7 +178,7 @@ Eval-only outputs are written separately and do not overwrite the original train
 Each episode samples physical and initial-state parameters
 
 $$
-\phi \sim p(\phi),
+\phi \sim p(\phi)
 $$
 
 including projectile and shield mass, MuJoCo contact parameters, arm configuration, spacecraft rates, and projectile initial state.
@@ -186,25 +186,13 @@ including projectile and shield mass, MuJoCo contact parameters, arm configurati
 The simulator state contains spacecraft pose and twist, arm state, and projectile state:
 
 $$
-x_t =
-\left(
-T^W_{B,t},
-V^W_{B,t},
-q_t,
-\dot q_t,
-p^W_t,
-v^W_t
-\right).
+x_t = \left(T^W_{B,t}, V^W_{B,t}, q_t, \dot q_t, p^W_t, v^W_t\right)
 $$
 
 MuJoCo integrates nonlinear free-floating dynamics and contact at 1 kHz:
 
 $$
-x_{k+1}
-=
-F_{\Delta t_{\mathrm{sim}}}(x_k,u_k;\phi),
-\qquad
-\Delta t_{\mathrm{sim}}=1\text{ ms}.
+x_{k+1} = F_{\Delta t_{\mathrm{sim}}}(x_k,u_k;\phi), \qquad \Delta t_{\mathrm{sim}} = 1\,\mathrm{ms}
 $$
 
 The simulator has access to ground-truth state for physics, reward computation, and evaluation. The **policy does not receive ground-truth projectile state or contact time**.
@@ -214,31 +202,26 @@ The simulator has access to ground-truth state for physics, reward computation, 
 The projectile is observed through noisy position measurements in spacecraft coordinates:
 
 $$
-z_k =
-(R^W_{B,k})^\top
-\left(p^W_k-r^W_{B,k}\right)
-+\epsilon_k,
-\qquad
-\epsilon_k\sim\mathcal N(0,\Sigma_z).
+z_k = (R^W_{B,k})^\top \left(p^W_k-r^W_{B,k}\right) + \epsilon_k, \qquad \epsilon_k \sim \mathcal{N}(0,\Sigma_z)
 $$
 
 A Kalman filter maintains a Gaussian belief over world-frame projectile position and velocity using a constant-velocity prior:
 
 $$
 \begin{bmatrix}
-p^W_{k+1}\\
+p^W_{k+1} \\
 v^W_{k+1}
 \end{bmatrix}
 =
 \begin{bmatrix}
-I & \Delta t I\\
+I & \Delta t I \\
 0 & I
 \end{bmatrix}
 \begin{bmatrix}
-p^W_k\\
+p^W_k \\
 v^W_k
 \end{bmatrix}
-+Gw_k.
++ G w_k
 $$
 
 The posterior is transformed to spacecraft-relative coordinates before being passed to the policy.
@@ -246,12 +229,7 @@ The posterior is transformed to spacecraft-relative coordinates before being pas
 The Gymnasium observation is
 
 $$
-o_t =
-\{
-\texttt{observation}\in\mathbb R^{49},
-\;
-\texttt{desired\_goal}\in\mathbb R^3
-\}.
+o_t = \left\{\texttt{observation} \in \mathbb{R}^{49},\; \texttt{desired\_goal} \in \mathbb{R}^3\right\}
 $$
 
 The 49D observation contains the projectile belief mean and covariance diagonal, arm state, spacecraft pose and twist, previous action, interception-corridor features, and episode progress.
@@ -263,9 +241,7 @@ The goal is the desired outgoing projectile velocity expressed in current spacec
 SAC acts every 250 ms:
 
 $$
-a_t\sim\pi_\theta(a\mid o_t,g),
-\qquad
-a_t\in[-1,1]^8.
+a_t \sim \pi_\theta(a \mid o_t,g), \qquad a_t \in [-1,1]^8
 $$
 
 Each action specifies a complete contact goal and joint trajectory. Only the first 250 ms is executed before observing and replanning.
@@ -283,31 +259,19 @@ This gives SAC a short receding-horizon decision sequence while retaining fine c
 For projectile belief mean $(\hat p^W,\hat v^W)$, the decoder considers the mean projectile trajectory
 
 $$
-p^W(\tau)=\hat p^W+\tau\hat v^W.
+p^W(\tau) = \hat p^W + \tau \hat v^W
 $$
 
 This trajectory is intersected with a spacecraft-attached ellipsoidal candidate workspace
 
 $$
-\mathcal W=
-\left\{
-p:
-\left\|
-D^{-1}R_{WB}^{\top}(p-c^W)
-\right\|_2
-\le 1
-\right\}.
+\mathcal W = \left\{p : \left\lVert D^{-1}R_{WB}^{\top}(p-c^W) \right\rVert_2 \le 1\right\}
 $$
 
 If the feasible time interval is $[\tau_-,\tau_+]$, the first SAC action coordinate selects
 
 $$
-\tau(a_0)
-=
-\tau_-
-+
-\frac{a_0+1}{2}
-(\tau_+-\tau_-).
+\tau(a_0) = \tau_- + \frac{a_0+1}{2}(\tau_+-\tau_-)
 $$
 
 The 8D action has the following semantics:
@@ -322,9 +286,7 @@ The 8D action has the following semantics:
 The contact frame is
 
 $$
-C=[n,t_1,t_2],
-\qquad
-n=-\frac{\hat v^W}{\|\hat v^W\|}.
+C = [n,t_1,t_2], \qquad n = -\frac{\hat v^W}{\lVert \hat v^W \rVert_2}
 $$
 
 Mink IK constrains shield-center position and alignment of the shield's local $+z$ normal. Shield yaw remains free, allowing the wrist to exploit this redundancy for reachability.
@@ -336,21 +298,13 @@ IK freezes the measured spacecraft pose and enforces configured joint and collis
 At the terminal configuration, desired joint velocity is obtained from a bounded regularized twist fit:
 
 $$
-\dot q^*
-=
-\arg\min_{-\dot q_{\max}\le\dot q\le\dot q_{\max}}
-\left\|
-W^{1/2}
-(J(q)\dot q-\xi^*)
-\right\|_2^2
-+
-\lambda\|\dot q\|_2^2.
+\dot q^* = \arg\min_{-\dot q_{\max}\le\dot q\le\dot q_{\max}} \left\lVert W^{1/2}\left(J(q)\dot q-\xi^*\right) \right\rVert_2^2 + \lambda\lVert\dot q\rVert_2^2
 $$
 
 The current trajectory backend fits independent quintics
 
 $$
-q_j(t)=\sum_{i=0}^{5}c_{j,i}t^i
+q_j(t) = \sum_{i=0}^{5} c_{j,i}t^i
 $$
 
 between the initial and requested terminal $(q,\dot q,\ddot q)$.
@@ -360,15 +314,7 @@ between the initial and requested terminal $(q,\dot q,\ddot q)$.
 Torque tracking uses bounded PD control:
 
 $$
-u=
-\operatorname{clip}
-\left(
-K_p(q_{\mathrm{ref}}-q)
-+
-K_d(\dot q_{\mathrm{ref}}-\dot q),
--u_{\max},
-u_{\max}
-\right).
+u = \operatorname{clip}\left(K_p(q_{\mathrm{ref}}-q) + K_d(\dot q_{\mathrm{ref}}-\dot q), -u_{\max}, u_{\max}\right)
 $$
 
 ## Reward
@@ -380,18 +326,7 @@ Following shield contact, the environment executes a short follow-through and br
 The successful-contact reward is
 
 $$
-r_T=
-\exp\left[
--\left(
-\frac{\|v_{\mathrm{out}}-v_{\mathrm{goal}}\|_2}{\sigma_v}
-\right)^2
-\right]
--
-w_L
-h_\delta
-\left(
-\frac{\|\Delta L_B\|_2}{L_0}
-\right),
+r_T = \exp\left[-\left(\frac{\lVert v_{\mathrm{out}}-v_{\mathrm{goal}} \rVert_2}{\sigma_v}\right)^2\right] - w_L h_\delta\left(\frac{\lVert \Delta L_B \rVert_2}{L_0}\right)
 $$
 
 where $\Delta L_B$ is the change in angular momentum of the spacecraft bus-and-arm subtree.
@@ -399,19 +334,7 @@ where $\Delta L_B$ is the change in angular momentum of the spacecraft bus-and-a
 Misses receive
 
 $$
-r_T=
--c_{\mathrm{miss}}
--
-h_\delta
-\left(
-\frac{d_{\min}}{d_0}
-\right)
--
-w_L
-h_\delta
-\left(
-\frac{\|\Delta L_B\|_2}{L_0}
-\right).
+r_T = -c_{\mathrm{miss}} - h_\delta\left(\frac{d_{\min}}{d_0}\right) - w_L h_\delta\left(\frac{\lVert \Delta L_B \rVert_2}{L_0}\right)
 $$
 
 Reward parameters are configured in `configs/env.yaml`.
@@ -419,17 +342,7 @@ Reward parameters are configured in `configs/env.yaml`.
 SAC optimizes the standard maximum-entropy objective
 
 $$
-J(\pi)
-=
-\mathbb E
-\left[
-\sum_t
-\gamma^t
-\left(
-r_t+
-\alpha\mathcal H(\pi(\cdot\mid o_t,g))
-\right)
-\right].
+J(\pi) = \mathbb{E}\left[\sum_t \gamma^t\left(r_t + \alpha\mathcal{H}\left(\pi(\cdot \mid o_t,g)\right)\right)\right]
 $$
 
 The current training default uses adaptive entropy tuning initialized at $\alpha_0=0.3$ (`auto_0.3`). Short preliminary experiments favored adaptive entropy over fixed $\alpha=0.01$; this is an empirical default rather than a completed hyperparameter study.
