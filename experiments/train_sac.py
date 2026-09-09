@@ -91,6 +91,7 @@ def _start_wandb(
             "mode": "eval_only" if arguments.eval_only else "training",
             "timesteps": arguments.timesteps,
             "seed": arguments.seed,
+            "num_envs": arguments.num_envs,
             "entropy_coefficient": arguments.ent_coef,
             "evaluation_episodes": arguments.eval_episodes,
             "render_episodes": arguments.render_episodes,
@@ -141,6 +142,7 @@ def _evaluate_and_render(
     mode: str,
     training_timesteps: int | None,
     training_seed: int | None,
+    training_num_envs: int | None,
 ) -> Path:
     if evaluation_episodes < 1 or not 0 <= render_episodes <= evaluation_episodes:
         raise ValueError(
@@ -169,6 +171,7 @@ def _evaluate_and_render(
         "checkpoint": str(checkpoint.resolve()),
         "training_timesteps": training_timesteps,
         "training_seed": training_seed,
+        "training_num_envs": training_num_envs,
         "evaluation_seeds": seeds,
         "evaluation": evaluation,
         "rendered_episodes": rendered,
@@ -200,6 +203,12 @@ def main() -> None:
     parser.add_argument("--env-config", default="configs/env.yaml")
     parser.add_argument("--timesteps", type=int, default=10_000)
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument(
+        "--num-envs",
+        type=int,
+        default=8,
+        help="parallel rollout environments (default: 8; use 1 for serial)",
+    )
     parser.add_argument(
         "--ent-coef",
         type=_parse_entropy_coefficient,
@@ -252,6 +261,8 @@ def main() -> None:
     arguments = parser.parse_args()
     if arguments.checkpoint is not None and not arguments.eval_only:
         parser.error("--checkpoint is only valid with --eval-only")
+    if arguments.num_envs < 1:
+        parser.error("--num-envs must be positive")
 
     decoder = StructuredDecoderConfig.load(arguments.decoder_config)
     task = ContactDeflectionConfig.load(arguments.env_config, decoder=decoder)
@@ -280,6 +291,7 @@ def main() -> None:
                 mode="eval_only",
                 training_timesteps=None,
                 training_seed=None,
+                training_num_envs=None,
             )
         else:
             checkpoint = train_sac(
@@ -291,6 +303,7 @@ def main() -> None:
                     entropy_coefficient=arguments.ent_coef,
                     progress_bar=arguments.progress_bar,
                     wandb_enabled=wandb_run is not None,
+                    num_envs=arguments.num_envs,
                 ),
             )
             print(f"Saved SAC checkpoint: {checkpoint}")
@@ -307,6 +320,7 @@ def main() -> None:
                 mode="post_training",
                 training_timesteps=arguments.timesteps,
                 training_seed=arguments.seed,
+                training_num_envs=arguments.num_envs,
             )
         if wandb_run is not None:
             _log_wandb_outputs(wandb_run, summary_path, checkpoint)

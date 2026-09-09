@@ -639,7 +639,7 @@ class ContactDeflectionEnv(SpaceRobotEnv):
         torque = np.zeros(self.model.nu)
         for step_index in range(steps):
             elapsed = step_index * self.config.sim_dt
-            if step_index % self.config.physics_steps_per_control == 0:
+            if step_index % self._physics_steps_per_control == 0:
                 reference = self._post_contact_reference(impact_reference, elapsed)
                 torque = self.controller.compute(
                     self.arm_q, self.arm_qd, reference.q, reference.qd
@@ -742,8 +742,8 @@ class ContactDeflectionEnv(SpaceRobotEnv):
         contact = False
         impact_reference: JointKinematicState | None = None
         torque = np.zeros(self.model.nu)
-        for step_index in range(self.config.physics_steps_per_action):
-            if step_index % self.config.physics_steps_per_control == 0:
+        for step_index in range(self._physics_steps_per_action):
+            if step_index % self._physics_steps_per_control == 0:
                 if (
                     ik_feasible
                     and isinstance(decoded, DecodedAction)

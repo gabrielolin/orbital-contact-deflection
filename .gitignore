@@ -13,3 +13,4 @@ checkpoints/
 scratch/
 outputs/
 .vscode/
+MUJOCO_LOG.TXT

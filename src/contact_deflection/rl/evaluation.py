@@ -240,7 +240,7 @@ class RecordingContactEnv(ContactDeflectionEnv):
         hold_q = self.arm_q
         torque = np.zeros(self.model.nu)
         for step_index in range(round(seconds / self.config.sim_dt)):
-            if step_index % self.config.physics_steps_per_control == 0:
+            if step_index % self._physics_steps_per_control == 0:
                 torque = self.controller.compute(
                     self.arm_q, self.arm_qd, hold_q, np.zeros(6)
                 )

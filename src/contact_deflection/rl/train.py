@@ -1,5 +1,6 @@
 """Thin Stable-Baselines3 orchestration for the contact benchmark."""
 
+import os
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -24,6 +25,11 @@ class SACTrainConfig:
     entropy_coefficient: str | float = "auto_0.3"
     progress_bar: bool = True
     wandb_enabled: bool = False
+    num_envs: int = 8
+
+    def __post_init__(self) -> None:
+        if self.num_envs < 1:
+            raise ValueError("num_envs must be positive")
 
 
 def environment_factory(
@@ -39,16 +45,23 @@ def train_sac(
 ) -> Path:
     """Train SAC on the canonical environment and return the final model path."""
     try:
+        import torch
         from stable_baselines3 import SAC
         from stable_baselines3.common.callbacks import BaseCallback, EvalCallback
         from stable_baselines3.common.monitor import Monitor
-        from stable_baselines3.common.vec_env import DummyVecEnv
+        from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
     except ImportError as error:  # pragma: no cover - exercised by installation docs
         raise ImportError(
             "Install the RL extra with `pip install -e '.[rl]'`."
         ) from error
 
     settings = train_config or SACTrainConfig()
+    # Tiny SAC networks are substantially slower when PyTorch dispatches each
+    # operation across every host core. Workers inherit these limits when they
+    # are started with spawn, preventing nested BLAS oversubscription.
+    os.environ.setdefault("OMP_NUM_THREADS", "1")
+    os.environ.setdefault("MKL_NUM_THREADS", "1")
+    torch.set_num_threads(1)
     run_dir = Path(settings.run_dir)
     run_dir.mkdir(parents=True, exist_ok=True)
     monitor_keys = (
@@ -64,17 +77,30 @@ def train_sac(
         "angular_momentum_penalty",
         "post_contact_separated",
     )
-    environment = DummyVecEnv(
-        [lambda: Monitor(ContactDeflectionEnv(task_config), info_keywords=monitor_keys)]
+    def monitored_environment() -> gym.Env:
+        return Monitor(ContactDeflectionEnv(task_config), info_keywords=monitor_keys)
+
+    factories: list[Callable[[], gym.Env]] = [
+        monitored_environment for _ in range(settings.num_envs)
+    ]
+    environment = (
+        DummyVecEnv(factories)
+        if settings.num_envs == 1
+        else SubprocVecEnv(factories, start_method="spawn")
     )
-    evaluation_environment = DummyVecEnv(
-        [lambda: Monitor(ContactDeflectionEnv(task_config), info_keywords=monitor_keys)]
+    evaluation_factories: list[Callable[[], gym.Env]] = [monitored_environment]
+    evaluation_environment = (
+        DummyVecEnv(evaluation_factories)
+        if settings.num_envs == 1
+        else SubprocVecEnv(evaluation_factories, start_method="spawn")
     )
     evaluation_callback = EvalCallback(
         evaluation_environment,
         best_model_save_path=str(run_dir / "best"),
         log_path=str(run_dir / "evaluations"),
-        eval_freq=max(1, settings.evaluation_frequency),
+        # Callback calls count vector steps, while evaluation_frequency is
+        # expressed in replay-buffer transitions.
+        eval_freq=max(1, round(settings.evaluation_frequency / settings.num_envs)),
         n_eval_episodes=settings.evaluation_episodes,
         deterministic=True,
     )
@@ -98,6 +124,9 @@ def train_sac(
             environment,
             seed=settings.seed,
             ent_coef=settings.entropy_coefficient,
+            # One vector step yields num_envs transitions. Preserve the
+            # single-environment ratio of one update per collected transition.
+            gradient_steps=-1,
             tensorboard_log=tensorboard_log,
             verbose=1,
         )
