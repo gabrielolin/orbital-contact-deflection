@@ -162,6 +162,8 @@ def test_projectile_is_unforced_before_contact() -> None:
 
 def test_macro_step_uses_policy_and_control_clocks() -> None:
     environment = ContactDeflectionEnv(workspace=_workspace_at_initial_shield())
+    assert environment._physics_steps_per_control == 5
+    assert environment._physics_steps_per_action == 250
     environment.reset(seed=0)
     control_calls = 0
     original_compute = environment.controller.compute

@@ -252,22 +252,37 @@ class QuinticTrajectoryGenerator:
             dtype=float,
         )
         trajectory = QuinticJointTrajectory(np.linalg.solve(system, boundary), t)
-        samples = [
-            trajectory.sample(sample_time)
-            for sample_time in np.linspace(0, t, 101)
-        ]
-        positions = np.stack([sample.q for sample in samples])
-        velocities = np.stack([sample.qd for sample in samples])
-        accelerations = np.stack(
-            [np.asarray(sample.qdd, dtype=float) for sample in samples]
+        sample_times = np.linspace(0.0, t, 101)
+        time_powers = np.column_stack(
+            [sample_times**power for power in range(6)]
         )
-        jerks = np.stack(
-            [
-                6 * trajectory.coefficients[3]
-                + 24 * trajectory.coefficients[4] * sample_time
-                + 60 * trajectory.coefficients[5] * sample_time**2
-                for sample_time in np.linspace(0, t, 101)
-            ]
+        velocity_powers = np.column_stack(
+            (
+                np.zeros_like(sample_times),
+                np.ones_like(sample_times),
+                2.0 * sample_times,
+                3.0 * sample_times**2,
+                4.0 * sample_times**3,
+                5.0 * sample_times**4,
+            )
+        )
+        acceleration_powers = np.column_stack(
+            (
+                np.zeros_like(sample_times),
+                np.zeros_like(sample_times),
+                2.0 * np.ones_like(sample_times),
+                6.0 * sample_times,
+                12.0 * sample_times**2,
+                20.0 * sample_times**3,
+            )
+        )
+        positions = time_powers @ trajectory.coefficients
+        velocities = velocity_powers @ trajectory.coefficients
+        accelerations = acceleration_powers @ trajectory.coefficients
+        jerks = (
+            6.0 * trajectory.coefficients[3]
+            + 24.0 * sample_times[:, None] * trajectory.coefficients[4]
+            + 60.0 * sample_times[:, None] ** 2 * trajectory.coefficients[5]
         )
         within_limits = bool(
             np.all(positions >= self.limits.position_lower)

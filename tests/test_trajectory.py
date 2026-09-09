@@ -80,3 +80,12 @@ def test_quintic_short_duration_reports_missing_reference() -> None:
     result = QuinticTrajectoryGenerator(_limits()).solve(state, state, 0.0)
     assert result.trajectory is None
     assert result.status == "duration_too_short"
+
+
+def test_quintic_vectorized_limit_check_detects_interior_peak() -> None:
+    limits = JointTrajectoryLimits([-2], [2], [1], [10], [100])
+    initial = JointKinematicState([0], [0], [0])
+    target = JointKinematicState([1], [0], [0])
+    result = QuinticTrajectoryGenerator(limits).solve(initial, target, 1.0)
+    assert not result.success
+    assert result.status == "limit_violation"

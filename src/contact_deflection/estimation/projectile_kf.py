@@ -44,15 +44,29 @@ class ProjectileKalmanFilter:
         self.acceleration_noise_std = float(acceleration_noise_std)
         self.measurement_covariance = float(measurement_noise_std) ** 2 * np.eye(3)
         self.timestamp = float(timestamp)
+        self._prediction_parameters: tuple[float, float] | None = None
+        self._transition = np.empty((6, 6))
+        self._process_covariance = np.empty((6, 6))
+
+    def _prediction_matrices(self, dt: float) -> tuple[np.ndarray, np.ndarray]:
+        parameters = (dt, self.acceleration_noise_std)
+        if parameters != self._prediction_parameters:
+            identity = np.eye(3)
+            transition = np.eye(6)
+            transition[:3, 3:] = dt * identity
+            noise_gain = np.vstack((0.5 * dt**2 * identity, dt * identity))
+            self._transition = transition
+            self._process_covariance = (
+                self.acceleration_noise_std**2 * noise_gain @ noise_gain.T
+            )
+            self._prediction_parameters = parameters
+        return self._transition, self._process_covariance
 
     def predict(self, dt: float) -> None:
         """Propagate the world-frame constant-velocity model by ``dt``."""
         if dt <= 0:
             raise ValueError("dt must be positive")
-        transition = np.eye(6)
-        transition[:3, 3:] = dt * np.eye(3)
-        noise_gain = np.vstack((0.5 * dt**2 * np.eye(3), dt * np.eye(3)))
-        process_covariance = self.acceleration_noise_std**2 * noise_gain @ noise_gain.T
+        transition, process_covariance = self._prediction_matrices(dt)
         self.mean = transition @ self.mean
         self.covariance = (
             transition @ self.covariance @ transition.T + process_covariance

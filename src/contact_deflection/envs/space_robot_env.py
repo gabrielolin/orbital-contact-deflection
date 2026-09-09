@@ -78,6 +78,11 @@ class SpaceRobotEnv(gym.Env[Any, np.ndarray]):
         if render_mode not in (None, "rgb_array"):
             raise ValueError("render_mode must be None or 'rgb_array'")
         self.config = config if config is not None else SpaceRobotConfig()
+        # The frozen clock configuration has already validated these ratios.
+        # Cache them once rather than repeating NumPy-based validation in every
+        # 1 ms physics iteration.
+        self._physics_steps_per_control = self.config.physics_steps_per_control
+        self._physics_steps_per_action = self.config.physics_steps_per_action
         self.render_mode = render_mode
         self.model = mujoco.MjModel.from_xml_path(
             str(Path(scene_path) if scene_path is not None else default_scene_path())
