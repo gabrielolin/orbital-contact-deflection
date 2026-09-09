@@ -24,7 +24,10 @@ rl = [
   "stable-baselines3>=2.5,<3",
   "imageio>=2.36,<3",
   "imageio-ffmpeg>=0.5,<1",
+  "tqdm>=4.66",
+  "rich>=13",
 ]
+tracking = ["wandb>=0.18", "tensorboard>=2.16"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

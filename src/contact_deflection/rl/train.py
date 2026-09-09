@@ -22,6 +22,8 @@ class SACTrainConfig:
     # The fixed 0.01 probe under-explored. The successful automatic-entropy
     # probe converged near 0.325, so initialize adaptive tuning close to 0.3.
     entropy_coefficient: str | float = "auto_0.3"
+    progress_bar: bool = True
+    wandb_enabled: bool = False
 
 
 def environment_factory(
@@ -38,7 +40,7 @@ def train_sac(
     """Train SAC on the canonical environment and return the final model path."""
     try:
         from stable_baselines3 import SAC
-        from stable_baselines3.common.callbacks import EvalCallback
+        from stable_baselines3.common.callbacks import BaseCallback, EvalCallback
         from stable_baselines3.common.monitor import Monitor
         from stable_baselines3.common.vec_env import DummyVecEnv
     except ImportError as error:  # pragma: no cover - exercised by installation docs
@@ -68,7 +70,7 @@ def train_sac(
     evaluation_environment = DummyVecEnv(
         [lambda: Monitor(ContactDeflectionEnv(task_config), info_keywords=monitor_keys)]
     )
-    callback = EvalCallback(
+    evaluation_callback = EvalCallback(
         evaluation_environment,
         best_model_save_path=str(run_dir / "best"),
         log_path=str(run_dir / "evaluations"),
@@ -76,15 +78,34 @@ def train_sac(
         n_eval_episodes=settings.evaluation_episodes,
         deterministic=True,
     )
+    callbacks: list[BaseCallback] = [evaluation_callback]
+    tensorboard_log: str | None = None
+    if settings.wandb_enabled:
+        try:
+            import wandb
+            from wandb.integration.sb3 import WandbCallback
+        except ImportError as error:  # pragma: no cover - installation error path
+            raise ImportError(
+                "Install tracking support with `pip install -e '.[tracking]'`."
+            ) from error
+        if wandb.run is None:
+            raise RuntimeError("wandb_enabled requires an active wandb.init() run")
+        callbacks.append(WandbCallback(gradient_save_freq=0, model_save_freq=0))
+        tensorboard_log = str(run_dir / "tensorboard")
     try:
         model = SAC(
             "MultiInputPolicy",
             environment,
             seed=settings.seed,
             ent_coef=settings.entropy_coefficient,
+            tensorboard_log=tensorboard_log,
             verbose=1,
         )
-        model.learn(total_timesteps=settings.total_timesteps, callback=callback)
+        model.learn(
+            total_timesteps=settings.total_timesteps,
+            callback=callbacks,
+            progress_bar=settings.progress_bar,
+        )
         model_path = run_dir / "final_model"
         model.save(str(model_path))
         return model_path.with_suffix(".zip")

@@ -264,7 +264,7 @@ testing, and video dependencies. The equivalent pip development installation
 is:
 
 ```bash
-python -m pip install -e '.[dev,render,rl]'
+python -m pip install -e '.[dev,render,rl,tracking]'
 ```
 
 ## Running the code
@@ -319,7 +319,9 @@ python experiments/train_sac.py \
 
 The command trains `MultiInputPolicy`, saves periodic evaluation data and the
 best periodic model, saves the final checkpoint, evaluates deterministic
-held-out seeds, and renders annotated episodes. The output layout is:
+held-out seeds, and renders annotated episodes. Training displays an SB3
+tqdm/rich progress bar by default; pass `--no-progress` for non-interactive log
+files. The output layout is:
 
 ```text
 outputs/sac/full_run/
@@ -359,6 +361,44 @@ python experiments/train_sac.py \
 
 Eval-only results use `eval_only_summary.json` and `eval_only_renders/`, so they
 do not overwrite the original post-training report.
+
+### Weights & Biases
+
+W&B tracking uses the `contact-deflection` project by default. Authenticate
+once for online logging:
+
+```bash
+wandb login
+```
+
+Then add a project name to the normal training command:
+
+```bash
+python experiments/train_sac.py \
+  --timesteps 1000000 \
+  --seed 0 \
+  --run-dir outputs/sac/full_run \
+  --wandb-name sac-seed-0 \
+  --wandb-tag full-run \
+  --wandb-tag seed-0
+```
+
+This synchronizes SB3 TensorBoard metrics—including actor/critic losses,
+entropy coefficient, episode return, and periodic deterministic evaluation—to
+W&B. Final aggregate metrics, rendered videos, the evaluation summary, and the
+policy checkpoint are also logged. Use `--wandb-project` or `WANDB_PROJECT` to
+override the default project. `WANDB_ENTITY` and `WANDB_MODE` environment
+variables are also supported. For a network-free run that can be synchronized
+later, use:
+
+```bash
+python experiments/train_sac.py \
+  --timesteps 1000000 \
+  --run-dir outputs/sac/offline_run \
+  --wandb-mode offline
+```
+
+Use `--wandb-mode disabled` to run without recording or uploading W&B data.
 
 ## Configuration
 

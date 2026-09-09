@@ -61,6 +61,73 @@ def _entropy_summary(model: SAC) -> dict[str, str | float]:
     return result
 
 
+def _start_wandb(
+    arguments: argparse.Namespace,
+    task: ContactDeflectionConfig,
+) -> Any | None:
+    if arguments.wandb_project is None:
+        return None
+    tracking_dir = arguments.run_dir / "wandb"
+    tracking_dir.mkdir(parents=True, exist_ok=True)
+    # Keep all W&B state with the experiment. In particular, artifact staging
+    # otherwise defaults to a user-level directory that may be read-only on
+    # managed compute nodes.
+    os.environ.setdefault("WANDB_DATA_DIR", str(tracking_dir / "data"))
+    os.environ.setdefault("WANDB_CACHE_DIR", str(tracking_dir / "cache"))
+    try:
+        import wandb
+    except ImportError as error:  # pragma: no cover - installation error path
+        raise ImportError(
+            "Install tracking support with `pip install -e '.[tracking]'`."
+        ) from error
+    return wandb.init(
+        project=arguments.wandb_project,
+        entity=arguments.wandb_entity,
+        name=arguments.wandb_name,
+        tags=arguments.wandb_tags,
+        mode=arguments.wandb_mode,
+        dir=str(tracking_dir),
+        config={
+            "mode": "eval_only" if arguments.eval_only else "training",
+            "timesteps": arguments.timesteps,
+            "seed": arguments.seed,
+            "entropy_coefficient": arguments.ent_coef,
+            "evaluation_episodes": arguments.eval_episodes,
+            "render_episodes": arguments.render_episodes,
+            "evaluation_seed": arguments.eval_seed,
+            "post_contact_seconds": arguments.post_contact_seconds,
+            "task": _jsonable(asdict(task)),
+        },
+        sync_tensorboard=not arguments.eval_only,
+        save_code=False,
+    )
+
+
+def _log_wandb_outputs(run: Any, summary_path: Path, checkpoint: Path) -> None:
+    import wandb
+
+    summary = json.loads(summary_path.read_text())
+    aggregate = summary["evaluation"]["aggregate"]
+    metrics = {
+        f"final_evaluation/{key}": value
+        for key, value in aggregate.items()
+        if value is not None
+    }
+    videos = {
+        f"final_evaluation/video_{index:02d}": wandb.Video(
+            rollout["video"], fps=30, format="mp4"
+        )
+        for index, rollout in enumerate(summary["rendered_episodes"])
+    }
+    run.log({**metrics, **videos})
+    for key, value in metrics.items():
+        run.summary[key] = value
+    artifact = wandb.Artifact("contact-deflection-policy", type="model")
+    artifact.add_file(str(checkpoint), name=checkpoint.name)
+    artifact.add_file(str(summary_path), name=summary_path.name)
+    run.log_artifact(artifact)
+
+
 def _evaluate_and_render(
     model: SAC,
     task: ContactDeflectionConfig,
@@ -139,6 +206,12 @@ def main() -> None:
         default="auto_0.3",
         help="SAC entropy coefficient (default: adaptive, initialized at 0.3)",
     )
+    parser.add_argument(
+        "--no-progress",
+        action="store_false",
+        dest="progress_bar",
+        help="disable the tqdm training progress bar",
+    )
     parser.add_argument("--run-dir", type=Path, default=Path("outputs/sac"))
     parser.add_argument(
         "--eval-only",
@@ -154,6 +227,28 @@ def main() -> None:
     parser.add_argument("--render-episodes", type=int, default=3)
     parser.add_argument("--eval-seed", type=int, default=10_000)
     parser.add_argument("--post-contact-seconds", type=float, default=4.0)
+    parser.add_argument(
+        "--wandb-project",
+        default=os.environ.get("WANDB_PROJECT", "contact-deflection"),
+        help=(
+            "W&B project name (default: contact-deflection; WANDB_PROJECT "
+            "overrides the default)"
+        ),
+    )
+    parser.add_argument("--wandb-entity", default=os.environ.get("WANDB_ENTITY"))
+    parser.add_argument("--wandb-name")
+    parser.add_argument(
+        "--wandb-mode",
+        choices=("online", "offline", "disabled"),
+        default=os.environ.get("WANDB_MODE", "online"),
+    )
+    parser.add_argument(
+        "--wandb-tag",
+        action="append",
+        dest="wandb_tags",
+        default=[],
+        help="repeat to attach multiple W&B tags",
+    )
     arguments = parser.parse_args()
     if arguments.checkpoint is not None and not arguments.eval_only:
         parser.error("--checkpoint is only valid with --eval-only")
@@ -161,55 +256,63 @@ def main() -> None:
     decoder = StructuredDecoderConfig.load(arguments.decoder_config)
     task = ContactDeflectionConfig.load(arguments.env_config, decoder=decoder)
     arguments.run_dir.mkdir(parents=True, exist_ok=True)
-    if arguments.eval_only:
-        checkpoint = (
-            arguments.checkpoint
-            if arguments.checkpoint is not None
-            else latest_checkpoint(arguments.run_dir)
-        )
-        if not checkpoint.is_file():
-            parser.error(f"checkpoint does not exist: {checkpoint}")
-        model = SAC.load(checkpoint)
-        print(f"Loaded SAC checkpoint: {checkpoint}")
-        _evaluate_and_render(
-            model,
-            task,
-            checkpoint,
-            arguments.run_dir,
-            evaluation_episodes=arguments.eval_episodes,
-            render_episodes=arguments.render_episodes,
-            evaluation_seed=arguments.eval_seed,
-            post_contact_seconds=arguments.post_contact_seconds,
-            mode="eval_only",
-            training_timesteps=None,
-            training_seed=None,
-        )
-        return
-
-    checkpoint = train_sac(
-        task,
-        SACTrainConfig(
-            total_timesteps=arguments.timesteps,
-            seed=arguments.seed,
-            run_dir=str(arguments.run_dir),
-            entropy_coefficient=arguments.ent_coef,
-        ),
-    )
-    print(f"Saved SAC checkpoint: {checkpoint}")
-    model = SAC.load(checkpoint)
-    _evaluate_and_render(
-        model,
-        task,
-        checkpoint,
-        arguments.run_dir,
-        evaluation_episodes=arguments.eval_episodes,
-        render_episodes=arguments.render_episodes,
-        evaluation_seed=arguments.eval_seed,
-        post_contact_seconds=arguments.post_contact_seconds,
-        mode="post_training",
-        training_timesteps=arguments.timesteps,
-        training_seed=arguments.seed,
-    )
+    wandb_run = _start_wandb(arguments, task)
+    try:
+        if arguments.eval_only:
+            checkpoint = (
+                arguments.checkpoint
+                if arguments.checkpoint is not None
+                else latest_checkpoint(arguments.run_dir)
+            )
+            if not checkpoint.is_file():
+                parser.error(f"checkpoint does not exist: {checkpoint}")
+            model = SAC.load(checkpoint)
+            print(f"Loaded SAC checkpoint: {checkpoint}")
+            summary_path = _evaluate_and_render(
+                model,
+                task,
+                checkpoint,
+                arguments.run_dir,
+                evaluation_episodes=arguments.eval_episodes,
+                render_episodes=arguments.render_episodes,
+                evaluation_seed=arguments.eval_seed,
+                post_contact_seconds=arguments.post_contact_seconds,
+                mode="eval_only",
+                training_timesteps=None,
+                training_seed=None,
+            )
+        else:
+            checkpoint = train_sac(
+                task,
+                SACTrainConfig(
+                    total_timesteps=arguments.timesteps,
+                    seed=arguments.seed,
+                    run_dir=str(arguments.run_dir),
+                    entropy_coefficient=arguments.ent_coef,
+                    progress_bar=arguments.progress_bar,
+                    wandb_enabled=wandb_run is not None,
+                ),
+            )
+            print(f"Saved SAC checkpoint: {checkpoint}")
+            model = SAC.load(checkpoint)
+            summary_path = _evaluate_and_render(
+                model,
+                task,
+                checkpoint,
+                arguments.run_dir,
+                evaluation_episodes=arguments.eval_episodes,
+                render_episodes=arguments.render_episodes,
+                evaluation_seed=arguments.eval_seed,
+                post_contact_seconds=arguments.post_contact_seconds,
+                mode="post_training",
+                training_timesteps=arguments.timesteps,
+                training_seed=arguments.seed,
+            )
+        if wandb_run is not None:
+            _log_wandb_outputs(wandb_run, summary_path, checkpoint)
+    finally:
+        if wandb_run is not None:
+            wandb_run.finish()
 
 
 if __name__ == "__main__":

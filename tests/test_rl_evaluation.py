@@ -21,7 +21,10 @@ class ZeroPolicy:
 
 
 def test_sac_uses_evidence_based_adaptive_entropy_default() -> None:
-    assert SACTrainConfig().entropy_coefficient == "auto_0.3"
+    config = SACTrainConfig()
+    assert config.entropy_coefficient == "auto_0.3"
+    assert config.progress_bar
+    assert not config.wandb_enabled
 
 
 def test_evaluation_records_seeded_episode_and_aggregate_metrics() -> None:
